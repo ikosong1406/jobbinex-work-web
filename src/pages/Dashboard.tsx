@@ -14,25 +14,28 @@ import {
   formatDistanceToNow,
   parseISO,
   isThisWeek,
-  isSameDay,
   getDay,
 } from "date-fns";
 import Api from "../components/Api";
 
 // --- Configuration ---
+// NOTE: Assuming this endpoint returns the Assistant's data as provided in the JSON
 const CLIENT_DASHBOARD_ENDPOINT = `${Api}/work/userdata`;
 
-// --- Type Definitions based on Schemas ---
+// --- Type Definitions based on the PROVIDED Assistant Schemas ---
 
-// 1. Notification Type (Used for Activity Feed)
+// 1. Notification Type (Extracted from the root 'notifications' array)
 interface Notification {
   _id: string;
+  // NOTE: Assuming 'message' is the field for notification content, though
+  // the JSON only shows 'messages' as an array of message *objects* (not single notifications).
+  // Sticking to the original Notification type for simplicity, but the data is sparse.
   message: string;
-  type: "message" | "job" | "plan" | "system" | "application" | "general";
-  createdAt: string; // ISO date string for sorting/time formatting
+  type: "message" | "job" | "plan" | "system" | "application" | "general"; // Retained from original code
+  createdAt: string; // ISO date string
 }
 
-// 2. Job Type (Simplified for Dashboard Application List)
+// 2. Job Type (Extracted from the root 'jobs' array)
 interface Job {
   _id: string;
   title: string;
@@ -45,23 +48,30 @@ interface Job {
     | "Rejected"
     | "Hired"
     | "Archived";
-  appliedDate: string | null; // <-- Important for the new logic
-  interviewDates: Array<{ date: string }>;
+  appliedDate: string | null;
+  // interviewDates: Array<{ date: string }>; // Field is not present in the provided JSON
 }
 
-// 3. Backend Response Type
-interface DashboardData {
-  firstname: string;
-  lastname: string;
-  plan: {
-    name: "Starter" | "Professional" | "Elite";
-    expiresAt: string;
-  };
-  jobs: Job[];
-  notifications: Notification[];
+// 3. Client Type (Extracted from the root 'clients' array)
+interface Client {
+    _id: string;
+    firstname: string;
+    lastname: string;
+    email: string;
+    jobs: string[]; // Array of Job IDs
+    // Other fields like phonenumber, jobEmail, etc.
 }
 
-// 4. UI State Types
+// 4. Backend Response Type (Adjusted to match the provided Assistant data structure)
+interface AssistantDashboardData {
+  firstname: string; // Assistant's first name
+  lastname: string; // Assistant's last name
+  clients: Client[]; // List of clients managed by the assistant
+  jobs: Job[]; // List of all jobs associated with the assistant (or its clients)
+  notifications: Notification[]; // List of notifications
+}
+
+// 5. UI State Types (Unchanged)
 interface WeeklyPerformanceData {
   day: string;
   applications: number;
@@ -76,6 +86,10 @@ interface DashboardStats {
 
 /**
  * Calculates dashboard statistics from the Jobs array.
+ * NOTE: The 'interviewDates' field is missing in the provided JSON, so the interview count will be 0.
+ * To fix this, you would need to either:
+ * a) Update the backend to include `interviewDates` in the root `jobs` array.
+ * b) Refine the logic to check for a specific status like 'Interviewing' (which is done below).
  */
 const calculateStats = (jobs: Job[]): DashboardStats => {
   const totalApplications = jobs.filter(
@@ -85,10 +99,11 @@ const calculateStats = (jobs: Job[]): DashboardStats => {
     ["Applied", "Interviewing"].includes(job.status)
   ).length;
 
-  let interviewsScheduled = 0;
-  jobs.forEach((job) => {
-    interviewsScheduled += job.interviewDates.length;
-  });
+  // Since interviewDates is missing in the provided JSON, we approximate by counting 'Interviewing' status
+  // If the backend is updated to include `interviewDates`, this logic should be changed.
+  const interviewsScheduled = jobs.filter((job) =>
+    job.status === "Interviewing"
+  ).length;
 
   return {
     totalApplications,
@@ -98,10 +113,7 @@ const calculateStats = (jobs: Job[]): DashboardStats => {
 };
 
 /**
- * **NEW UTILITY FUNCTION**
  * Calculates weekly application performance based on 'appliedDate'.
- * @param jobs The full list of jobs.
- * @returns An array for the BarChart data.
  */
 const calculateWeeklyPerformance = (jobs: Job[]): WeeklyPerformanceData[] => {
   // Initialize data for Mon (1) to Sun (0)
@@ -118,8 +130,14 @@ const calculateWeeklyPerformance = (jobs: Job[]): WeeklyPerformanceData[] => {
   // Filter jobs that have an appliedDate and were applied this week
   const appliedThisWeek = jobs.filter((job) => {
     if (job.appliedDate) {
-      const appliedDate = parseISO(job.appliedDate);
-      return isThisWeek(appliedDate, { weekStartsOn: 1 }); // Start week on Monday
+      // FIX: Check if appliedDate is a valid date before parsing
+      try {
+        const appliedDate = parseISO(job.appliedDate);
+        return isThisWeek(appliedDate, { weekStartsOn: 1 }); // Start week on Monday
+      } catch (e) {
+        console.warn(`Invalid appliedDate found for job ${job._id}: ${job.appliedDate}`);
+        return false;
+      }
     }
     return false;
   });
@@ -152,8 +170,11 @@ const calculateWeeklyPerformance = (jobs: Job[]): WeeklyPerformanceData[] => {
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [name, setName] = useState("Client");
+  // State for the Assistant's name
+  const [name, setName] = useState("Assistant");
+  // State for the ALL jobs managed by the Assistant
   const [jobs, setJobs] = useState<Job[]>([]);
+  // State for the ALL notifications
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [stats, setStats] = useState<DashboardStats>({
     totalApplications: 0,
@@ -161,7 +182,6 @@ const Home: React.FC = () => {
     interviewsScheduled: 0,
   });
 
-  // **UPDATED**: Chart data is now stateful and calculated from job data
   const [weeklyPerformance, setWeeklyPerformance] = useState<
     WeeklyPerformanceData[]
   >([]);
@@ -172,8 +192,8 @@ const Home: React.FC = () => {
   };
 
   /**
-   * Fetches all dashboard data (user, jobs, notifications)
-   */
+     * Fetches all dashboard data (user, jobs, notifications)
+     */
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
@@ -186,7 +206,7 @@ const Home: React.FC = () => {
           return;
         }
 
-        const response = await axios.get<DashboardData>(
+        const response = await axios.get<AssistantDashboardData>( // Use the new type
           CLIENT_DASHBOARD_ENDPOINT,
           {
             headers: {
@@ -197,18 +217,18 @@ const Home: React.FC = () => {
 
         const data = response.data;
 
-        // Set core user info
-        setName(data.firstname || "Client");
+        // FIX: Extract Assistant's name from the root object
+        setName(data.firstname || "Assistant");
 
-        // Set dynamic data
-        setJobs(data.jobs);
-        setNotifications(data.notifications);
+        // FIX: Use the root 'jobs' and 'notifications' arrays, which are the collective data
+        setJobs(data.jobs || []);
+        setNotifications(data.notifications || []); // Assuming notifications in the JSON are correctly structured
 
         // Calculate and set stats
-        setStats(calculateStats(data.jobs));
+        setStats(calculateStats(data.jobs || []));
 
-        // **NEW CALCULATION** for the chart data
-        setWeeklyPerformance(calculateWeeklyPerformance(data.jobs));
+        // NEW CALCULATION for the chart data
+        setWeeklyPerformance(calculateWeeklyPerformance(data.jobs || []));
       } catch (error) {
         const axiosError = error as AxiosError;
         console.error("Dashboard data fetch failed:", axiosError);
@@ -236,7 +256,24 @@ const Home: React.FC = () => {
     (sum, d) => sum + d.applications,
     0
   );
+
+  // FIX: Notifications array is an array of simple objects with only _id, not the full Notification type.
+  // The provided JSON for 'messages' at the root level is:
+  /*
+    "messages": [
+      {
+        "_id": "6925ed051f522086171b8ad7",
+        ...
+        "conversation": [...]
+      }
+    ]
+  */
+  // Since the UI uses a `Notification[]` type, and the provided JSON's `notifications: []` is empty,
+  // we cannot show recent activity from the root `notifications` or `messages` without mapping them.
+  // **ASSUMPTION:** We will keep the `notifications` array as the source for `recentActivity`
+  // and assume it will eventually contain proper Notification objects.
   const recentActivity = notifications
+    .filter(item => item.createdAt && item.message) // Only show items with valid data
     .sort(
       (a, b) =>
         parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()
@@ -340,7 +377,7 @@ const Home: React.FC = () => {
           </div>
         </div>
 
-        {/* 4. Recent Applications (Replaces Clients Overview) */}
+        {/* 4. Recent Applications */}
         <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Recent Applications
@@ -356,6 +393,7 @@ const Home: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
+                {/* FIX: Ensure that only valid dates are formatted */}
                 {jobs.slice(0, 5).map(
                   (
                     job // Display top 5 recent jobs
@@ -384,7 +422,7 @@ const Home: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-gray-700">
-                        {job.appliedDate
+                        {job.appliedDate && !isNaN(new Date(job.appliedDate).getTime())
                           ? new Date(job.appliedDate).toLocaleDateString()
                           : "N/A"}
                       </td>

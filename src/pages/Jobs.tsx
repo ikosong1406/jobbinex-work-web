@@ -8,6 +8,8 @@ import Api from "../components/Api";
 // --- API Endpoints ---
 const USER_DATA_ENDPOINT = `${Api}/work/userdata`;
 const CREATE_JOB_ENDPOINT = `${Api}/work/newJob`;
+const GET_CLIENT_JOBS_ENDPOINT = `${Api}/work/getClientJobs`; // New endpoint
+const UPDATE_JOB_STATUS_ENDPOINT = `${Api}/work/updateJobStatus`; // New endpoint
 
 // --- Interfaces ---
 interface Client {
@@ -19,9 +21,9 @@ interface Client {
   jobEmail: string;
   jobPassword: string;
   cv: string;
-  preferredIndustries: string[];
-  preferredRoles: string[];
-  preferredLocations: string[];
+  preferredIndustries: string | string[];
+  preferredRoles: string | string[];
+  preferredLocations: string | string[];
 }
 
 interface UserData {
@@ -34,13 +36,22 @@ interface UserData {
 }
 
 interface Application {
-  id: number;
-  jobTitle: string;
+  _id: string;
+  title: string;
   company: string;
-  link: string;
-  submissionDate: string;
+  jobUrl: string;
+  appliedDate: string;
   notes: string;
   status: string;
+  description: string;
+  location: string;
+  jobType: string;
+  requiredSkills: string[];
+  salaryRange?: {
+    min?: number;
+    max?: number;
+    currency?: string;
+  };
 }
 
 interface NewJobPayload {
@@ -58,11 +69,7 @@ interface NewJobPayload {
     | "Rejected"
     | "Hired"
     | "Archived";
-
-  // Required by backend
   description: string;
-
-  // Optional fields
   location: string;
   jobType: string;
   requiredSkills: string[];
@@ -73,6 +80,22 @@ interface NewJobPayload {
   };
 }
 
+// Helper function to safely ensure a value is an array of strings
+const safeArrayOfStrings = (
+  value: string | string[] | null | undefined
+): string[] => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return [];
+};
+
 const JobScreen: React.FC = () => {
   const navigate = useNavigate();
 
@@ -82,6 +105,7 @@ const JobScreen: React.FC = () => {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
   const [newApp, setNewApp] = useState({
     jobTitle: "",
@@ -89,16 +113,14 @@ const JobScreen: React.FC = () => {
     link: "",
     submissionDate: new Date().toISOString().split("T")[0],
     notes: "",
-    status: "Applied",
-
-    // NEW FIELDS
+    status: "Pending",
     description: "",
     location: "",
     jobType: "",
     skillsInput: "",
     salaryMin: "",
     salaryMax: "",
-    salaryCurrency: "USD",
+    salaryCurrency: "GBP",
   });
 
   const [activeTab, setActiveTab] = useState<"details" | "applications">(
@@ -126,9 +148,9 @@ const JobScreen: React.FC = () => {
             jobEmail: client.jobEmail || "",
             jobPassword: client.jobPassword || "",
             cv: client.cv || "",
-            preferredIndustries: client.preferredIndustries || [],
-            preferredRoles: client.preferredRoles || [],
-            preferredLocations: client.preferredLocations || [],
+            preferredIndustries: safeArrayOfStrings(client.preferredIndustries),
+            preferredRoles: safeArrayOfStrings(client.preferredRoles),
+            preferredLocations: safeArrayOfStrings(client.preferredLocations),
           }))
         );
       } catch (error) {
@@ -145,6 +167,32 @@ const JobScreen: React.FC = () => {
 
     fetchUserData();
   }, [navigate]);
+
+  // Fetch client jobs when a client is selected
+  useEffect(() => {
+    const fetchClientJobs = async () => {
+      if (!selectedClient) return;
+
+      try {
+        const token = await localforage.getItem("authToken");
+        if (!token) return;
+
+        const response = await axios.get(
+          `${GET_CLIENT_JOBS_ENDPOINT}/${selectedClient._id}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        setApplications(response.data.jobs || []);
+      } catch (error) {
+        console.error("Failed to fetch client jobs:", error);
+        toast.error("Failed to load client applications.");
+      }
+    };
+
+    fetchClientJobs();
+  }, [selectedClient]);
 
   const getClientName = (client: Client) =>
     `${client.firstname} ${client.lastname}`;
@@ -172,16 +220,13 @@ const JobScreen: React.FC = () => {
         appliedDate: newApp.submissionDate,
         notes: newApp.notes,
         status: newApp.status as NewJobPayload["status"],
-
         description: newApp.description,
         location: newApp.location,
         jobType: newApp.jobType,
-
         requiredSkills: newApp.skillsInput
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s !== ""),
-
         salaryRange:
           newApp.salaryMin || newApp.salaryMax
             ? {
@@ -196,25 +241,32 @@ const JobScreen: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Update table
-      setApplications((prev) => [...prev, { id: Date.now(), ...newApp }]);
+      // Refresh the applications list
+      const jobsResponse = await axios.get(
+        `${GET_CLIENT_JOBS_ENDPOINT}/${selectedClient._id}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
+      setApplications(jobsResponse.data.jobs || []);
       toast.success("Application added!");
 
+      // Reset form
       setNewApp({
         jobTitle: "",
         company: "",
         link: "",
         submissionDate: new Date().toISOString().split("T")[0],
         notes: "",
-        status: "Applied",
+        status: "Pending",
         description: "",
         location: "",
         jobType: "",
         skillsInput: "",
         salaryMin: "",
         salaryMax: "",
-        salaryCurrency: "USD",
+        salaryCurrency: "GBP",
       });
     } catch (error) {
       console.error(error);
@@ -224,8 +276,51 @@ const JobScreen: React.FC = () => {
     }
   };
 
+  // UPDATE JOB STATUS
+  const handleUpdateStatus = async (jobId: string, newStatus: string) => {
+    setUpdatingStatus(jobId);
+
+    try {
+      const token = await localforage.getItem("authToken");
+      if (!token) throw new Error("Missing token.");
+
+      await axios.patch(
+        `${UPDATE_JOB_STATUS_ENDPOINT}/${jobId}/status`,
+        { status: newStatus },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      // Update local state
+      setApplications((prev) =>
+        prev.map((app) =>
+          app._id === jobId ? { ...app, status: newStatus } : app
+        )
+      );
+
+      toast.success("Status updated successfully!");
+    } catch (error) {
+      console.error("Failed to update status:", error);
+      toast.error("Failed to update status.");
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
+
   const clientDetails = useMemo(() => {
     if (!selectedClient) return null;
+
+    const roles = Array.isArray(selectedClient.preferredRoles)
+      ? selectedClient.preferredRoles
+      : [];
+    const locations = Array.isArray(selectedClient.preferredLocations)
+      ? selectedClient.preferredLocations
+      : [];
+    const industries = Array.isArray(selectedClient.preferredIndustries)
+      ? selectedClient.preferredIndustries
+      : [];
+
     return [
       { label: "Email", value: selectedClient.email },
       { label: "Phone", value: selectedClient.phonenumber },
@@ -234,18 +329,29 @@ const JobScreen: React.FC = () => {
       { label: "CV Link", value: selectedClient.cv },
       {
         label: "Preferred Roles",
-        value: selectedClient.preferredRoles.join(", ") || "N/A",
+        value: roles.join(", ") || "N/A",
       },
       {
         label: "Locations",
-        value: selectedClient.preferredLocations.join(", ") || "N/A",
+        value: locations.join(", ") || "N/A",
       },
       {
         label: "Industries",
-        value: selectedClient.preferredIndustries.join(", ") || "N/A",
+        value: industries.join(", ") || "N/A",
       },
     ];
   }, [selectedClient]);
+
+  // Status options for dropdown
+  const statusOptions = [
+    "Applied",
+    "Pending",
+    "Interviewing",
+    "Offer Received",
+    "Rejected",
+    "Hired",
+    "Archived",
+  ];
 
   // --- UI ---
   if (loading)
@@ -276,15 +382,21 @@ const JobScreen: React.FC = () => {
                 </h2>
                 <p className="text-sm">
                   <strong>Roles:</strong>{" "}
-                  {client.preferredRoles.join(", ") || "N/A"}
+                  {Array.isArray(client.preferredRoles)
+                    ? client.preferredRoles.join(", ") || "N/A"
+                    : client.preferredRoles || "N/A"}
                 </p>
                 <p className="text-sm">
                   <strong>Locations:</strong>{" "}
-                  {client.preferredLocations.join(", ") || "N/A"}
+                  {Array.isArray(client.preferredLocations)
+                    ? client.preferredLocations.join(", ") || "N/A"
+                    : client.preferredLocations || "N/A"}
                 </p>
                 <p className="text-sm">
                   <strong>Industries:</strong>{" "}
-                  {client.preferredIndustries.join(", ") || "N/A"}
+                  {Array.isArray(client.preferredIndustries)
+                    ? client.preferredIndustries.join(", ") || "N/A"
+                    : client.preferredIndustries || "N/A"}
                 </p>
               </div>
             ))
@@ -457,7 +569,6 @@ const JobScreen: React.FC = () => {
                     <option value="USD">USD</option>
                     <option value="EUR">EUR</option>
                     <option value="GBP">GBP</option>
-                    <option value="NGN">NGN</option>
                   </select>
                 </div>
 
@@ -477,12 +588,11 @@ const JobScreen: React.FC = () => {
                     setNewApp({ ...newApp, status: e.target.value })
                   }
                 >
-                  <option value="Pending">Pending</option>
-                  <option value="Applied">Applied</option>
-                  <option value="Interviewing">Interviewing</option>
-                  <option value="Offer Received">Offer Received</option>
-                  <option value="Rejected">Rejected</option>
-                  <option value="Archived">Archived</option>
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -516,13 +626,35 @@ const JobScreen: React.FC = () => {
                       {applications.length > 0 ? (
                         applications.map((app) => (
                           <tr
-                            key={app.id}
+                            key={app._id}
                             className="border-t hover:bg-gray-50"
                           >
-                            <td className="py-2 px-3">{app.jobTitle}</td>
+                            <td className="py-2 px-3">{app.title}</td>
                             <td className="py-2 px-3">{app.company}</td>
-                            <td className="py-2 px-3">{app.status}</td>
-                            <td className="py-2 px-3">{app.submissionDate}</td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={app.status}
+                                onChange={(e) =>
+                                  handleUpdateStatus(app._id, e.target.value)
+                                }
+                                disabled={updatingStatus === app._id}
+                                className="border rounded px-2 py-1 text-sm bg-white disabled:opacity-50"
+                              >
+                                {statusOptions.map((status) => (
+                                  <option key={status} value={status}>
+                                    {status}
+                                  </option>
+                                ))}
+                              </select>
+                              {updatingStatus === app._id && (
+                                <span className="ml-2 text-xs text-gray-500">
+                                  Updating...
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3">
+                              {new Date(app.appliedDate).toLocaleDateString()}
+                            </td>
                             <td className="py-2 px-3">{app.notes}</td>
                           </tr>
                         ))

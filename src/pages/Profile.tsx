@@ -1,14 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   FaEnvelope,
-  FaPhone,
-  FaMapMarkerAlt,
   FaBell,
   FaEye,
   FaEyeSlash,
-} from "react-icons/fa";
+  FaSignOutAlt,
+} from "react-icons/fa"; // Imported FaSignOutAlt
 import axios, { AxiosError } from "axios";
-// Assuming you have a navigation hook and a storage library
 import { useNavigate } from "react-router-dom";
 import localforage from "localforage";
 import Api from "../components/Api";
@@ -60,9 +58,9 @@ interface BackendResponse {
 // --- 2. UI-Optimized Interface (What the component consumes) ---
 interface UserStats {
   clients: number;
-  totalApplications: number; // Mocked for display
-  approvedJobs: number; // Mocked for display
-  interviews: number; // Mocked for display
+  totalApplications: number;
+  approvedJobs: number;
+  interviews: number;
 }
 
 interface UserProfile {
@@ -116,7 +114,6 @@ const ProfilePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // State for toggles
-  // NOTE: 'online' state is now linked to 'profile.status'
   const [notifications, setNotifications] = useState(true);
   const [visibility, setVisibility] = useState(true);
 
@@ -124,6 +121,21 @@ const ProfilePage: React.FC = () => {
   const toast = {
     error: (message: string) => console.error(`Toast Error: ${message}`),
   };
+
+  /**
+   * Clears the auth token and redirects to the home/login page.
+   */
+  const handleLogout = useCallback(async () => {
+    try {
+      await localforage.removeItem("authToken");
+      // Use replace: true to prevent going back to the profile page after logout
+      navigate("/", { replace: true });
+    } catch (error) {
+      console.error("Logout failed:", error);
+      // Fallback for failed removal
+      navigate("/", { replace: true });
+    }
+  }, [navigate]);
 
   /**
    * Calculates the stats based on the jobs array.
@@ -157,7 +169,9 @@ const ProfilePage: React.FC = () => {
     });
 
     return {
-      clients: appliedJobs.length > 0 ? 1 : 0, // Simplified client count: 1 if user has applied for any job, otherwise 0.
+      // The API already provides the real client count, so this simplified
+      // calculation is now only used for the job stats portion if needed.
+      clients: appliedJobs.length > 0 ? 1 : 0,
       totalApplications,
       approvedJobs,
       interviews: totalInterviews,
@@ -175,7 +189,7 @@ const ProfilePage: React.FC = () => {
 
         if (!token) {
           toast.error("Session expired or token missing. Please log in.");
-          navigate("/");
+          handleLogout(); // Use handleLogout for consistent redirection
           return;
         }
 
@@ -220,8 +234,7 @@ const ProfilePage: React.FC = () => {
           axiosError.response?.status === 403
         ) {
           toast.error("Your session has expired. Please log in again.");
-          await localforage.removeItem("authToken");
-          navigate("/", { replace: true });
+          handleLogout(); // Use handleLogout for consistent redirection and token cleanup
         } else {
           setProfile(DEFAULT_PROFILE);
           toast.error("Failed to load user data.");
@@ -232,7 +245,7 @@ const ProfilePage: React.FC = () => {
     };
 
     fetchUserData();
-  }, [navigate]);
+  }, [handleLogout]); // Dependency on handleLogout
 
   // Use the 'profile.status' for the online state in the UI
   const isOnline = profile.status === "online";
@@ -271,23 +284,7 @@ const ProfilePage: React.FC = () => {
                 <span className="text-sm text-gray-700 font-medium">
                   {isOnline ? "Online" : "Offline"}
                 </span>
-                {/* <button
-                  // This button now needs to send an API request to change the status
-                  onClick={() =>
-                    console.log(
-                      `Attempting to set status to ${
-                        isOnline ? "offline" : "online"
-                      }`
-                    )
-                  }
-                  className={`ml-3 px-4 py-1 text-sm rounded-full font-medium transition-all ${
-                    isOnline
-                      ? "bg-red-100 text-red-600 hover:bg-red-200"
-                      : "bg-green-100 text-green-600 hover:bg-green-200"
-                  }`}
-                >
-                  {isOnline ? "Go Offline" : "Go Online"}
-                </button> */}
+                {/* Status Toggle Button (commented out as in original) */}
               </div>
             </div>
           </div>
@@ -307,6 +304,7 @@ const ProfilePage: React.FC = () => {
                 <FaEnvelope className="text-blue-500" />
                 Email: {profile.email}
               </li>
+              {/* Add other contact fields here if available on the profile */}
             </ul>
           </div>
 
@@ -360,20 +358,19 @@ const ProfilePage: React.FC = () => {
                   />
                 </div>
               </div>
-
-              <div className="pt-5 border-t mt-6">
-                <button className="text-blue-600 hover:text-blue-800 font-medium text-sm transition-colors">
-                  Update Password
-                </button>
-                <p className="text-xs text-red-500 mt-4">
-                  Danger Zone:
-                  <button className="ml-1 text-red-600 hover:underline">
-                    Deactivate Account
-                  </button>
-                </p>
-              </div>
             </div>
           </div>
+        </div>
+
+        {/* 🔑 Mobile-Only Logout Button */}
+        <div className="lg:hidden w-full max-w-sm mx-auto mt-8">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 text-lg font-semibold rounded-lg text-white bg-[#4eaa3c] transition duration-150 ease-in-out shadow-md"
+          >
+            <FaSignOutAlt className="text-xl" />
+            Logout
+          </button>
         </div>
       </div>
     </div>
