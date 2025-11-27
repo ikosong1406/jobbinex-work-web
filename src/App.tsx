@@ -17,37 +17,32 @@ import Inbox from "./pages/Inbox";
 import Profile from "./pages/Profile";
 
 // --- Protected Route Component ---
-/**
- * Checks for the presence of the authentication token in localforage.
- * Renders nested routes if authenticated, otherwise redirects to the login page.
- */
-const ProtectedLayout = () => {
-  // isAuthenticated: null = checking auth, false = not logged in, true = logged in
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        // Retrieve the token saved during login (using the key 'authToken' from the Login component)
-        const token = await localforage.getItem("authToken");
+// const ProtectedLayout = () => {
+//   // isAuthenticated: null = checking auth, false = not logged in, true = logged in
+//   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+//   const [loading, setLoading] = useState(true);
 
-        // If token exists and is a non-empty string, set isAuthenticated to true
-        setIsAuthenticated(!!token);
-      } catch (error) {
-        console.error("Auth check failed:", error);
-        setIsAuthenticated(false);
-      } finally {
-        setLoading(false);
-      }
-    };
-    checkAuth();
-  }, []);
+//   useEffect(() => {
+//     const checkAuth = async () => {
+//       try {
+//         // Retrieve the token saved during login (using the key 'authToken' from the Login component)
+//         const token = await localforage.getItem("authToken");
 
-  // If authenticated, render the nested routes via Outlet
-  // If not authenticated, redirect to the root path (which is Login)
-  return isAuthenticated ? <Outlet /> : <Navigate to="/" replace />;
-};
+//         // If token exists and is a non-empty string, set isAuthenticated to true
+//         setIsAuthenticated(!!token);
+//       } catch (error) {
+//         console.error("Auth check failed:", error);
+//         setIsAuthenticated(false);
+//       } finally {
+//         setLoading(false);
+//       }
+//     };
+//     checkAuth();
+//   }, []);
+
+//   return isAuthenticated ? <Outlet /> : <Navigate to="/" replace />;
+// };
 
 // --- Main App Component ---
 export default function App() {
