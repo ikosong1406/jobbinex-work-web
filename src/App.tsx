@@ -3,10 +3,10 @@ import {
   Routes,
   Route,
   Navigate,
-  Outlet, // Needed for ProtectedLayout
+  // Outlet,
 } from "react-router-dom";
-import localforage from "localforage"; // Needed to check token
-import { useEffect, useState } from "react"; // Needed for auth state management
+// import localforage from "localforage";
+// import { useEffect, useState } from "react";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/Forgot";
