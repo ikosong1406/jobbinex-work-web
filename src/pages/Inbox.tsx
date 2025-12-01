@@ -87,13 +87,9 @@ const Inbox: React.FC = () => {
   };
 
   // Function to enhance conversation data with display information
-  const enhanceConversationData = (
-    conversation: any,
-    userData: BackendResponse
-  ) => {
+  // Function to enhance conversation data with display information
+  const enhanceConversationData = (conversation: any) => {
     const clientUser = conversation.userId;
-    const lastMessage =
-      conversation.conversation[conversation.conversation.length - 1];
 
     return {
       id: conversation._id,
@@ -133,7 +129,7 @@ const Inbox: React.FC = () => {
         // Transform the API data into the format expected by the component
         const transformedClients: Client[] = userData.messages.map(
           (message) => {
-            return enhanceConversationData(message, userData);
+            return enhanceConversationData(message);
           }
         );
 
@@ -252,7 +248,7 @@ const Inbox: React.FC = () => {
       );
 
       const newConversation = createResponse.data.conversation;
-      const enhancedClient = enhanceConversationData(newConversation, userData);
+      const enhancedClient = enhanceConversationData(newConversation); // Removed userData parameter
 
       // Add the new conversation to clients list
       setClients((prev) => [enhancedClient, ...prev]);
