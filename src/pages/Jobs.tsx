@@ -86,6 +86,12 @@ interface NewJobPayload {
   };
 }
 
+interface ClientDetailItem {
+  label: string;
+  value: string;
+  isStatus?: boolean;
+}
+
 // Helper function to safely ensure a value is an array of strings
 const safeArrayOfStrings = (
   value: string | string[] | null | undefined
@@ -105,15 +111,15 @@ const safeArrayOfStrings = (
 // Helper function to format plan expiration date
 const formatPlanExpiration = (expiresAt: Date | string | undefined): string => {
   if (!expiresAt) return "No expiration date";
-  
+
   try {
     const date = new Date(expiresAt);
     if (isNaN(date.getTime())) return "Invalid date";
-    
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   } catch (error) {
     return "Invalid date";
@@ -123,7 +129,7 @@ const formatPlanExpiration = (expiresAt: Date | string | undefined): string => {
 // Helper function to check if plan is expired
 const isPlanExpired = (expiresAt: Date | string | undefined): boolean => {
   if (!expiresAt) return false;
-  
+
   try {
     const expirationDate = new Date(expiresAt);
     const today = new Date();
@@ -136,13 +142,13 @@ const isPlanExpired = (expiresAt: Date | string | undefined): boolean => {
 // Helper function to get plan days remaining
 const getPlanDaysRemaining = (expiresAt: Date | string | undefined): string => {
   if (!expiresAt) return "No expiration";
-  
+
   try {
     const expirationDate = new Date(expiresAt);
     const today = new Date();
     const timeDiff = expirationDate.getTime() - today.getTime();
     const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
-    
+
     if (daysRemaining < 0) return `Expired ${Math.abs(daysRemaining)} days ago`;
     if (daysRemaining === 0) return "Expires today";
     if (daysRemaining === 1) return "1 day remaining";
@@ -378,7 +384,7 @@ const JobScreen: React.FC = () => {
       ? selectedClient.preferredIndustries
       : [];
 
-    const details = [
+    const details: ClientDetailItem[] = [
       { label: "Email", value: selectedClient.email },
       { label: "Phone", value: selectedClient.phonenumber },
       { label: "Job Email", value: selectedClient.jobEmail },
@@ -401,7 +407,10 @@ const JobScreen: React.FC = () => {
     // Add plan details if available
     if (selectedClient.plan) {
       const isExpired = isPlanExpired(selectedClient.plan.expiresAt);
-      
+      const statusText = `${
+        isExpired ? "EXPIRED" : "ACTIVE"
+      } - ${getPlanDaysRemaining(selectedClient.plan.expiresAt)}`;
+
       details.push(
         {
           label: "Plan",
@@ -413,11 +422,8 @@ const JobScreen: React.FC = () => {
         },
         {
           label: "Plan Status",
-          value: (
-            <span className={`font-semibold ${isExpired ? 'text-red-600' : 'text-green-600'}`}>
-              {isExpired ? 'EXPIRED' : 'ACTIVE'} - {getPlanDaysRemaining(selectedClient.plan.expiresAt)}
-            </span>
-          ),
+          value: statusText,
+          isStatus: true,
         }
       );
     } else {
@@ -471,11 +477,15 @@ const JobScreen: React.FC = () => {
                 {/* Display plan info in client card */}
                 {client.plan && (
                   <div className="mb-2">
-                    <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                      client.plan.name === "Elite" ? "bg-purple-100 text-purple-800" :
-                      client.plan.name === "Professional" ? "bg-blue-100 text-blue-800" :
-                      "bg-green-100 text-green-800"
-                    }`}>
+                    <span
+                      className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
+                        client.plan.name === "Elite"
+                          ? "bg-purple-100 text-purple-800"
+                          : client.plan.name === "Professional"
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-green-100 text-green-800"
+                      }`}
+                    >
                       {client.plan.name} Plan
                     </span>
                     {isPlanExpired(client.plan.expiresAt) ? (
@@ -523,11 +533,15 @@ const JobScreen: React.FC = () => {
               </h2>
               {selectedClient.plan && (
                 <div className="flex items-center mt-1">
-                  <span className={`px-2 py-1 text-xs font-semibold rounded ${
-                    selectedClient.plan.name === "Elite" ? "bg-purple-100 text-purple-800" :
-                    selectedClient.plan.name === "Professional" ? "bg-blue-100 text-blue-800" :
-                    "bg-green-100 text-green-800"
-                  }`}>
+                  <span
+                    className={`px-2 py-1 text-xs font-semibold rounded ${
+                      selectedClient.plan.name === "Elite"
+                        ? "bg-purple-100 text-purple-800"
+                        : selectedClient.plan.name === "Professional"
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-green-100 text-green-800"
+                    }`}
+                  >
                     {selectedClient.plan.name} Plan
                   </span>
                   {isPlanExpired(selectedClient.plan.expiresAt) ? (
@@ -578,9 +592,24 @@ const JobScreen: React.FC = () => {
 
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {clientDetails?.map((item) => (
-                  <div key={item.label} className={item.label === "Plan Status" ? "col-span-2" : ""}>
+                  <div
+                    key={item.label}
+                    className={item.label === "Plan Status" ? "col-span-2" : ""}
+                  >
                     <dt className="text-gray-500">{item.label}</dt>
-                    <dd className="text-gray-900">{item.value}</dd>
+                    <dd
+                      className={`text-gray-900 ${
+                        item.isStatus ? "font-semibold" : ""
+                      } ${
+                        item.isStatus && item.value.includes("EXPIRED")
+                          ? "text-red-600"
+                          : item.isStatus && item.value.includes("ACTIVE")
+                          ? "text-green-600"
+                          : ""
+                      }`}
+                    >
+                      {item.value}
+                    </dd>
                   </div>
                 ))}
               </dl>
