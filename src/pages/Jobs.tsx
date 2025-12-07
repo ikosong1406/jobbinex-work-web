@@ -12,6 +12,11 @@ const GET_CLIENT_JOBS_ENDPOINT = `${Api}/work/getClientJobs`; // New endpoint
 const UPDATE_JOB_STATUS_ENDPOINT = `${Api}/work/updateJobStatus`; // New endpoint
 
 // --- Interfaces ---
+interface ClientPlan {
+  name: "Starter" | "Professional" | "Elite";
+  expiresAt: Date | string;
+}
+
 interface Client {
   _id: string;
   firstname: string;
@@ -24,6 +29,7 @@ interface Client {
   preferredIndustries: string | string[];
   preferredRoles: string | string[];
   preferredLocations: string | string[];
+  plan?: ClientPlan; // Add plan field
 }
 
 interface UserData {
@@ -96,6 +102,56 @@ const safeArrayOfStrings = (
   return [];
 };
 
+// Helper function to format plan expiration date
+const formatPlanExpiration = (expiresAt: Date | string | undefined): string => {
+  if (!expiresAt) return "No expiration date";
+  
+  try {
+    const date = new Date(expiresAt);
+    if (isNaN(date.getTime())) return "Invalid date";
+    
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  } catch (error) {
+    return "Invalid date";
+  }
+};
+
+// Helper function to check if plan is expired
+const isPlanExpired = (expiresAt: Date | string | undefined): boolean => {
+  if (!expiresAt) return false;
+  
+  try {
+    const expirationDate = new Date(expiresAt);
+    const today = new Date();
+    return expirationDate < today;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Helper function to get plan days remaining
+const getPlanDaysRemaining = (expiresAt: Date | string | undefined): string => {
+  if (!expiresAt) return "No expiration";
+  
+  try {
+    const expirationDate = new Date(expiresAt);
+    const today = new Date();
+    const timeDiff = expirationDate.getTime() - today.getTime();
+    const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    
+    if (daysRemaining < 0) return `Expired ${Math.abs(daysRemaining)} days ago`;
+    if (daysRemaining === 0) return "Expires today";
+    if (daysRemaining === 1) return "1 day remaining";
+    return `${daysRemaining} days remaining`;
+  } catch (error) {
+    return "Invalid date";
+  }
+};
+
 const JobScreen: React.FC = () => {
   const navigate = useNavigate();
 
@@ -151,6 +207,7 @@ const JobScreen: React.FC = () => {
             preferredIndustries: safeArrayOfStrings(client.preferredIndustries),
             preferredRoles: safeArrayOfStrings(client.preferredRoles),
             preferredLocations: safeArrayOfStrings(client.preferredLocations),
+            plan: client.plan || undefined,
           }))
         );
       } catch (error) {
@@ -321,7 +378,7 @@ const JobScreen: React.FC = () => {
       ? selectedClient.preferredIndustries
       : [];
 
-    return [
+    const details = [
       { label: "Email", value: selectedClient.email },
       { label: "Phone", value: selectedClient.phonenumber },
       { label: "Job Email", value: selectedClient.jobEmail },
@@ -340,6 +397,37 @@ const JobScreen: React.FC = () => {
         value: industries.join(", ") || "N/A",
       },
     ];
+
+    // Add plan details if available
+    if (selectedClient.plan) {
+      const isExpired = isPlanExpired(selectedClient.plan.expiresAt);
+      
+      details.push(
+        {
+          label: "Plan",
+          value: selectedClient.plan.name,
+        },
+        {
+          label: "Plan Expires",
+          value: formatPlanExpiration(selectedClient.plan.expiresAt),
+        },
+        {
+          label: "Plan Status",
+          value: (
+            <span className={`font-semibold ${isExpired ? 'text-red-600' : 'text-green-600'}`}>
+              {isExpired ? 'EXPIRED' : 'ACTIVE'} - {getPlanDaysRemaining(selectedClient.plan.expiresAt)}
+            </span>
+          ),
+        }
+      );
+    } else {
+      details.push({
+        label: "Plan",
+        value: "No plan assigned",
+      });
+    }
+
+    return details;
   }, [selectedClient]);
 
   // Status options for dropdown
@@ -380,6 +468,27 @@ const JobScreen: React.FC = () => {
                 <h2 className="text-lg font-semibold mb-2">
                   {getClientName(client)}
                 </h2>
+                {/* Display plan info in client card */}
+                {client.plan && (
+                  <div className="mb-2">
+                    <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
+                      client.plan.name === "Elite" ? "bg-purple-100 text-purple-800" :
+                      client.plan.name === "Professional" ? "bg-blue-100 text-blue-800" :
+                      "bg-green-100 text-green-800"
+                    }`}>
+                      {client.plan.name} Plan
+                    </span>
+                    {isPlanExpired(client.plan.expiresAt) ? (
+                      <span className="ml-2 text-xs text-red-600 font-semibold">
+                        EXPIRED
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-xs text-green-600 font-semibold">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                )}
                 <p className="text-sm">
                   <strong>Roles:</strong>{" "}
                   {Array.isArray(client.preferredRoles)
@@ -408,9 +517,34 @@ const JobScreen: React.FC = () => {
         <>
           {/* HEADER */}
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold">
-              {getClientName(selectedClient)}
-            </h2>
+            <div>
+              <h2 className="text-xl font-semibold">
+                {getClientName(selectedClient)}
+              </h2>
+              {selectedClient.plan && (
+                <div className="flex items-center mt-1">
+                  <span className={`px-2 py-1 text-xs font-semibold rounded ${
+                    selectedClient.plan.name === "Elite" ? "bg-purple-100 text-purple-800" :
+                    selectedClient.plan.name === "Professional" ? "bg-blue-100 text-blue-800" :
+                    "bg-green-100 text-green-800"
+                  }`}>
+                    {selectedClient.plan.name} Plan
+                  </span>
+                  {isPlanExpired(selectedClient.plan.expiresAt) ? (
+                    <span className="ml-2 text-xs text-red-600 font-semibold">
+                      • EXPIRED
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-xs text-green-600 font-semibold">
+                      • ACTIVE
+                    </span>
+                  )}
+                  <span className="ml-2 text-xs text-gray-600">
+                    {getPlanDaysRemaining(selectedClient.plan.expiresAt)}
+                  </span>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={() => setSelectedClient(null)}
@@ -444,7 +578,7 @@ const JobScreen: React.FC = () => {
 
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {clientDetails?.map((item) => (
-                  <div key={item.label}>
+                  <div key={item.label} className={item.label === "Plan Status" ? "col-span-2" : ""}>
                     <dt className="text-gray-500">{item.label}</dt>
                     <dd className="text-gray-900">{item.value}</dd>
                   </div>

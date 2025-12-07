@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FaPaperclip, FaPaperPlane, FaBars, FaSearch } from "react-icons/fa";
 import axios from "axios";
 import localforage from "localforage";
@@ -70,6 +70,13 @@ const Inbox: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<BackendResponse | null>(null);
+  const [isPolling] = useState(true);
+
+  // Use refs to track the latest state without causing re-renders
+  const clientsRef = useRef<Client[]>([]);
+  const selectedClientRef = useRef<Client | null>(null);
+  const userDataRef = useRef<BackendResponse | null>(null);
+  const isPollingRef = useRef(true);
 
   // Function to format time from ISO string to readable format
   const formatTime = (isoString: string) => {
@@ -87,7 +94,6 @@ const Inbox: React.FC = () => {
   };
 
   // Function to enhance conversation data with display information
-  // Function to enhance conversation data with display information
   const enhanceConversationData = (conversation: any) => {
     const clientUser = conversation.userId;
 
@@ -95,7 +101,7 @@ const Inbox: React.FC = () => {
       id: conversation._id,
       name: `${clientUser.firstname} ${clientUser.lastname}`,
       avatar: generateAvatar(`${clientUser.firstname} ${clientUser.lastname}`),
-      online: true, // You might want to add online status logic based on your requirements
+      online: true,
       messages: conversation.conversation.map((conv: any) => ({
         id: conv._id,
         sender: conv.role === "user" ? "client" : "assistant",
@@ -105,50 +111,103 @@ const Inbox: React.FC = () => {
     };
   };
 
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        setLoading(true);
-        const token = await localforage.getItem("authToken");
+  // Function to fetch user data (messages)
+  const fetchUserData = async () => {
+    try {
+      const token = await localforage.getItem("authToken");
 
-        if (!token) {
-          console.error("Session expired or token missing. Please log in.");
-          // handleLogout(); // Uncomment if you have logout functionality
-          return;
-        }
-
-        const response = await axios.get<BackendResponse>(USER_DATA_ENDPOINT, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        const userData = response.data;
-        setUserData(userData);
-
-        // Transform the API data into the format expected by the component
-        const transformedClients: Client[] = userData.messages.map(
-          (message) => {
-            return enhanceConversationData(message);
-          }
-        );
-
-        setClients(transformedClients);
-
-        // Set the first client as selected if available
-        if (transformedClients.length > 0) {
-          setSelectedClient(transformedClients[0]);
-        }
-      } catch (error) {
-        console.error("Error fetching user data:", error);
-        toast.error("Failed to load messages.");
-      } finally {
-        setLoading(false);
+      if (!token) {
+        console.error("Session expired or token missing. Please log in.");
+        return;
       }
-    };
 
+      const response = await axios.get<BackendResponse>(USER_DATA_ENDPOINT, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const userData = response.data;
+      setUserData(userData);
+      userDataRef.current = userData;
+
+      // Transform the API data into the format expected by the component
+      const transformedClients: Client[] = userData.messages.map((message) => {
+        return enhanceConversationData(message);
+      });
+
+      // Only update if there are actual changes to avoid unnecessary re-renders
+      if (
+        JSON.stringify(transformedClients) !==
+        JSON.stringify(clientsRef.current)
+      ) {
+        setClients(transformedClients);
+        clientsRef.current = transformedClients;
+
+        // Update selected client if it exists in the new data
+        if (selectedClientRef.current) {
+          const updatedSelectedClient = transformedClients.find(
+            (client) => client.id === selectedClientRef.current?.id
+          );
+          if (updatedSelectedClient) {
+            setSelectedClient(updatedSelectedClient);
+            selectedClientRef.current = updatedSelectedClient;
+          }
+        } else if (transformedClients.length > 0) {
+          // Set the first client as selected if no client is selected yet
+          setSelectedClient(transformedClients[0]);
+          selectedClientRef.current = transformedClients[0];
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching user data:", error);
+      // Only show error toast for initial load, not for polling failures
+      if (loading) {
+        toast.error("Failed to load messages.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial data fetch
+  useEffect(() => {
     fetchUserData();
   }, []);
+
+  // Polling effect - fetch messages every 2 seconds
+  useEffect(() => {
+    // Skip polling if not enabled
+    if (!isPolling) return;
+
+    const intervalId = setInterval(() => {
+      if (isPollingRef.current) {
+        fetchUserData();
+      }
+    }, 2000); // 2 seconds
+
+    // Cleanup interval on component unmount or when polling stops
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [isPolling]);
+
+  // Update refs when state changes
+  useEffect(() => {
+    clientsRef.current = clients;
+  }, [clients]);
+
+  useEffect(() => {
+    selectedClientRef.current = selectedClient;
+  }, [selectedClient]);
+
+  useEffect(() => {
+    userDataRef.current = userData;
+  }, [userData]);
+
+  useEffect(() => {
+    isPollingRef.current = isPolling;
+  }, [isPolling]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,7 +219,7 @@ const Inbox: React.FC = () => {
     setNewMessage("");
 
     const newEntry = {
-      id: Date.now().toString(),
+      id: `temp-${Date.now()}`,
       sender: "assistant" as const,
       text: messageContent,
       time: new Date().toLocaleTimeString([], {
@@ -199,6 +258,9 @@ const Inbox: React.FC = () => {
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      // Immediately refresh messages after sending
+      fetchUserData();
     } catch (err) {
       console.error("Message send failed:", err);
       toast.error("Failed to send message.");
@@ -208,7 +270,9 @@ const Inbox: React.FC = () => {
         prev
           ? {
               ...prev,
-              messages: prev.messages.filter((msg) => msg.id !== newEntry.id),
+              messages: prev.messages.filter(
+                (msg) => !msg.id.startsWith("temp-")
+              ),
             }
           : null
       );
@@ -248,7 +312,7 @@ const Inbox: React.FC = () => {
       );
 
       const newConversation = createResponse.data.conversation;
-      const enhancedClient = enhanceConversationData(newConversation); // Removed userData parameter
+      const enhancedClient = enhanceConversationData(newConversation);
 
       // Add the new conversation to clients list
       setClients((prev) => [enhancedClient, ...prev]);
@@ -260,47 +324,6 @@ const Inbox: React.FC = () => {
       toast.error("Failed to create new conversation.");
     }
   };
-
-  // const fetchOrCreateConversation = async () => {
-  //   if (!userData) {
-  //     toast.error("Assistant data not loaded.");
-  //     return;
-  //   }
-
-  //   // If we already have conversations, no need to create new one
-  //   if (clients.length > 0) {
-  //     return;
-  //   }
-
-  //   try {
-  //     const token = await localforage.getItem("authToken");
-  //     if (!token) {
-  //       toast.error("Authentication required.");
-  //       return;
-  //     }
-
-  //     // For assistant, we might want to show all their conversations
-  //     // or create a new one with a specific client
-  //     // This is a placeholder - adjust based on your requirements
-  //     if (userData.messages && userData.messages.length > 0) {
-  //       // Use existing conversations
-  //       const transformedClients: Client[] = userData.messages.map((message) => {
-  //         return enhanceConversationData(message, userData);
-  //       });
-  //       setClients(transformedClients);
-  //       if (transformedClients.length > 0) {
-  //         setSelectedClient(transformedClients[0]);
-  //       }
-  //     } else {
-  //       // No existing conversations - assistant can start new ones with clients
-  //       toast.info("No conversations yet. Select a client to start chatting.");
-  //     }
-
-  //   } catch (err) {
-  //     console.error("Conversation fetch failed:", err);
-  //     toast.error("Failed to load conversations.");
-  //   }
-  // };
 
   const handleAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files)
@@ -323,6 +346,7 @@ const Inbox: React.FC = () => {
   return (
     <div className="flex h-screen bg-gray-100 font-inter">
       <Toaster />
+
       {/* Sidebar (Clients List) */}
       <div
         className={`fixed lg:static top-0 left-0 h-full bg-white border-r border-gray-200 w-72 flex flex-col transition-transform duration-300 z-30
@@ -407,9 +431,16 @@ const Inbox: React.FC = () => {
                     <h3 className="text-sm font-medium text-gray-900">
                       {client.name}
                     </h3>
-                    {client.online && (
-                      <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {client.online && (
+                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                      )}
+                      {client.messages.length > 0 && (
+                        <span className="text-xs text-gray-400">
+                          {formatTime(new Date().toISOString())}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-gray-500 truncate">
                     {client.messages[client.messages.length - 1]?.text ||
@@ -484,7 +515,7 @@ const Inbox: React.FC = () => {
               <div
                 key={msg.id}
                 className={`flex items-end ${
-                  msg.sender === "client" ? "justify-start" : "justify-end" // Fixed: client on left, assistant on right
+                  msg.sender === "client" ? "justify-start" : "justify-end"
                 }`}
               >
                 {msg.sender === "client" && (
