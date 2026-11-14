@@ -1,22 +1,35 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import axios, { AxiosError } from "axios";
+import localforage from "localforage";
+import { toast, Toaster } from "react-hot-toast";
 import {
   FaEnvelope,
   FaBell,
   FaEye,
   FaEyeSlash,
   FaSignOutAlt,
-} from "react-icons/fa"; // Imported FaSignOutAlt
-import axios, { AxiosError } from "axios";
-import { useNavigate } from "react-router-dom";
-import localforage from "localforage";
+  FaUserTie,
+  FaBriefcase,
+  FaCheckCircle,
+  FaRegCalendarAlt,
+  FaUsers,
+  FaCircle,
+  FaChartLine,
+  FaArrowRight,
+  FaRegCalendarAlt as FaCalendar,
+} from "react-icons/fa";
+import { FiArrowUpRight } from "react-icons/fi";
 import Api from "../components/Api";
-// Assuming toast is imported from a library like 'react-hot-toast'
-// import toast from "react-hot-toast";
 
-// --- Configuration ---
-const USER_DATA_ENDPOINT = `${Api}/work/userdata`; // Replace with your actual endpoint URL
+const DEEP = "#17231a";
+const PRIMARY = "#4eaa3c";
+const USER_DATA_ENDPOINT = `${Api}/work/userdata`;
 
-// Type for the Job object based on the provided Mongoose schema
+// --------------------------------------------------
+// Types
+// --------------------------------------------------
+
 interface Job {
   _id: string;
   title: string;
@@ -29,33 +42,22 @@ interface Job {
     | "Hired"
     | "Archived";
   interviewDates: Array<{
-    date: Date;
+    date: string;
     type: "Screening" | "Technical" | "Behavioral" | "On-site";
     notes: string;
   }>;
-  // Include other necessary fields from your schema
-  // For calculation, 'status' and 'interviewDates' are the most crucial
 }
 
-// Interface for the actual API response structure
 interface BackendResponse {
-  resetCode: string | null;
-  resetCodeExpires: string | null;
   _id: string;
   firstname: string;
   lastname: string;
   email: string;
   status: "online" | "offline";
-  clients: string[]; // Used to calculate the 'clients' stat
-  jobs: Job[]; // UPDATED: Now an array of Job objects
-  notifications: string[];
-  messages: string[];
-  createdAt: string;
-  updatedAt: string;
-  __v: number;
+  clients: string[];
+  jobs: Job[];
 }
 
-// --- 2. UI-Optimized Interface (What the component consumes) ---
 interface UserStats {
   clients: number;
   totalApplications: number;
@@ -64,314 +66,450 @@ interface UserStats {
 }
 
 interface UserProfile {
-  name: string;
-  role: string;
-  initial: string; // New field for avatar generation
+  firstname: string;
+  lastname: string;
   email: string;
-  phone: string;
-  location: string;
-  bio: string;
   status: "online" | "offline";
   stats: UserStats;
 }
 
-// Default profile structure to use before data is fetched or on error
-const DEFAULT_PROFILE: UserProfile = {
-  name: "Loading User...",
-  role: "Job Application Agent",
-  initial: "L",
-  email: "...",
-  phone: "+234 801 234 5678",
-  location: "Lagos, Nigeria",
-  bio: "Loading user profile information...",
-  status: "offline",
-  stats: {
-    clients: 0,
-    totalApplications: 0,
-    approvedJobs: 0,
-    interviews: 0,
-  },
+// --------------------------------------------------
+// Helpers
+// --------------------------------------------------
+
+const getInitials = (first?: string, last?: string) => {
+  if (!first && !last) return "A";
+  return `${(first || "").charAt(0)}${(last || "").charAt(0)}`.toUpperCase();
 };
 
-// --- Avatar Component (Displays the first letter of the name) ---
-const InitialAvatar: React.FC<{ initial: string; className?: string }> = ({
-  initial,
-  className,
+const calculateJobStats = (jobs: Job[]): UserStats => {
+  const appliedJobs = jobs.filter(
+    (j) => j.status !== "Pending" && j.status !== "Archived"
+  );
+  const approvedJobs = jobs.filter(
+    (j) => j.status === "Offer Received" || j.status === "Hired"
+  ).length;
+
+  let totalInterviews = 0;
+  jobs.forEach((job) => {
+    if (
+      ["Interviewing", "Offer Received", "Hired"].includes(job.status) &&
+      Array.isArray(job.interviewDates)
+    ) {
+      totalInterviews += job.interviewDates.length;
+    }
+  });
+
+  return {
+    clients: 0, // filled from API
+    totalApplications: appliedJobs.length,
+    approvedJobs,
+    interviews: totalInterviews,
+  };
+};
+
+// --------------------------------------------------
+// Sub-components
+// --------------------------------------------------
+
+const SectionHeader: React.FC<{ title: string; description?: string }> = ({
+  title,
+  description,
 }) => (
-  <div
-    className={`w-20 h-20 rounded-full flex items-center justify-center bg-[#4eaa3c] text-white font-bold text-4xl shadow-lg border-4 border-white ring-2 ring-[#4eaa3c] ${className}`}
-  >
-    {initial.toUpperCase()}
+  <div className="mb-4">
+    <div className="flex items-center gap-2">
+      <span className="w-1 h-5 bg-[#4eaa3c] rounded-full" />
+      <h2 className="font-bold text-gray-900 text-lg">{title}</h2>
+    </div>
+    {description && (
+      <p className="text-xs text-gray-400 mt-1 pl-3">{description}</p>
+    )}
   </div>
 );
 
-// --- ProfilePage Component ---
+const SummaryRow: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  hint?: string;
+}> = ({ icon, label, value, hint }) => (
+  <div className="flex items-start gap-3 py-3">
+    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[#4eaa3c] text-xs">
+      {icon}
+    </div>
+    <div className="min-w-0 flex-1">
+      <p className="text-xs font-semibold text-gray-500">{label}</p>
+      <div className="mt-0.5 text-sm font-bold text-gray-900">{value}</div>
+      {hint && <p className="mt-0.5 text-[11px] text-gray-400">{hint}</p>}
+    </div>
+  </div>
+);
+
+const Toggle: React.FC<{
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  icon: React.ReactNode;
+  description?: string;
+}> = ({ checked, onChange, label, icon, description }) => (
+  <div className="flex items-start justify-between gap-4 py-3">
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 text-xs">
+        {icon}
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-gray-800">{label}</p>
+        {description && (
+          <p className="mt-0.5 text-xs text-gray-500">{description}</p>
+        )}
+      </div>
+    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      className={`relative w-11 h-6 shrink-0 flex items-center rounded-full transition ${
+        checked ? "bg-[#4eaa3c]" : "bg-gray-300"
+      }`}
+    >
+      <span
+        className={`absolute bg-white w-4 h-4 rounded-full transition-transform shadow ${
+          checked ? "translate-x-6" : "translate-x-1"
+        }`}
+      />
+    </button>
+  </div>
+);
+
+// --------------------------------------------------
+// Main
+// --------------------------------------------------
+
 const ProfilePage: React.FC = () => {
-  const navigate = useNavigate(); // Hook for navigation/redirection
+  const navigate = useNavigate();
 
-  // State for fetched user data
-  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
-  // State for toggles
   const [notifications, setNotifications] = useState(true);
   const [visibility, setVisibility] = useState(true);
 
-  // Helper function for dummy toast (replace with your actual toast implementation)
-  const toast = {
-    error: (message: string) => console.error(`Toast Error: ${message}`),
-  };
-
-  /**
-   * Clears the auth token and redirects to the home/login page.
-   */
   const handleLogout = useCallback(async () => {
     try {
       await localforage.removeItem("authToken");
-      // Use replace: true to prevent going back to the profile page after logout
-      navigate("/", { replace: true });
-    } catch (error) {
-      console.error("Logout failed:", error);
-      // Fallback for failed removal
+      toast.success("Logged out");
+    } catch (err) {
+      console.error("Logout failed:", err);
+    } finally {
       navigate("/", { replace: true });
     }
   }, [navigate]);
 
-  /**
-   * Calculates the stats based on the jobs array.
-   */
-  const calculateJobStats = (jobs: Job[]): UserStats => {
-    let totalApplications = 0;
-    let approvedJobs = 0;
-    let totalInterviews = 0;
-
-    // Filter jobs that were actually applied to (not just Pending or Archived)
-    const appliedJobs = jobs.filter(
-      (job) => job.status !== "Pending" && job.status !== "Archived"
-    );
-    totalApplications = appliedJobs.length;
-
-    // Count 'Offer Received' and 'Hired' jobs
-    approvedJobs = jobs.filter(
-      (job) => job.status === "Offer Received" || job.status === "Hired"
-    ).length;
-
-    // Count total unique interview dates across all jobs
-    jobs.forEach((job) => {
-      // We only count interviews if the job status is 'Interviewing' or higher
-      if (
-        job.status === "Interviewing" ||
-        job.status === "Offer Received" ||
-        job.status === "Hired"
-      ) {
-        totalInterviews += job.interviewDates.length;
-      }
-    });
-
-    return {
-      // The API already provides the real client count, so this simplified
-      // calculation is now only used for the job stats portion if needed.
-      clients: appliedJobs.length > 0 ? 1 : 0,
-      totalApplications,
-      approvedJobs,
-      interviews: totalInterviews,
-    };
-  };
-
-  /**
-   * Fetches the user data from the API endpoint using a Bearer token.
-   */
   useEffect(() => {
+    let mounted = true;
+
     const fetchUserData = async () => {
       try {
         setLoading(true);
-        const token = await localforage.getItem("authToken");
-
+        const token = await localforage.getItem<string>("authToken");
         if (!token) {
-          toast.error("Session expired or token missing. Please log in.");
-          handleLogout(); // Use handleLogout for consistent redirection
+          navigate("/", { replace: true });
           return;
         }
 
-        // Make the API call using the BackendResponse type
-        const response = await axios.get<BackendResponse>(USER_DATA_ENDPOINT, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        const res = await axios.get<BackendResponse>(USER_DATA_ENDPOINT, {
+          headers: { Authorization: `Bearer ${token}` },
         });
 
-        // 3. Map the API response to the UI-Optimized UserProfile state
-        const apiData = response.data;
+        if (!mounted) return;
+        const api = res.data;
+        const jobStats = calculateJobStats(api.jobs || []);
 
-        // Calculate the dynamic stats
-        const jobStats = calculateJobStats(apiData.jobs);
-
-        // Map the API response to the UI-Optimized UserProfile state
-        const mappedProfile: UserProfile = {
-          name: `${apiData.firstname} ${apiData.lastname}`,
-          email: apiData.email,
-          status: apiData.status,
-          initial: apiData.firstname.charAt(0) || DEFAULT_PROFILE.initial, // Get the first letter
+        setProfile({
+          firstname: api.firstname || "",
+          lastname: api.lastname || "",
+          email: api.email || "",
+          status: api.status || "offline",
           stats: {
             ...jobStats,
-            clients: apiData.clients.length, // Use actual clients count from API
+            clients: api.clients?.length ?? 0,
           },
-
-          // Default/placeholder values for fields missing in the API response
-          role: DEFAULT_PROFILE.role,
-          phone: DEFAULT_PROFILE.phone,
-          location: DEFAULT_PROFILE.location,
-          bio: DEFAULT_PROFILE.bio,
-        };
-
-        setProfile(mappedProfile);
-      } catch (error) {
-        const axiosError = error as AxiosError;
-        console.error("User data fetch failed:", axiosError);
-
+        });
+      } catch (err) {
+        if (!mounted) return;
+        const axiosError = err as AxiosError;
         if (
           axiosError.response?.status === 401 ||
           axiosError.response?.status === 403
         ) {
-          toast.error("Your session has expired. Please log in again.");
-          handleLogout(); // Use handleLogout for consistent redirection and token cleanup
+          await localforage.removeItem("authToken");
+          navigate("/", { replace: true });
         } else {
-          setProfile(DEFAULT_PROFILE);
-          toast.error("Failed to load user data.");
+          toast.error("Failed to load your profile.");
         }
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
     fetchUserData();
-  }, [handleLogout]); // Dependency on handleLogout
+    return () => {
+      mounted = false;
+    };
+  }, [navigate]);
 
-  // Use the 'profile.status' for the online state in the UI
-  const isOnline = profile.status === "online";
+  const isOnline = profile?.status === "online";
+  const initials = getInitials(profile?.firstname, profile?.lastname);
 
-  // Display a loading screen while data is being fetched
+  // --------------------------------------------------
+  // Loading
+  // --------------------------------------------------
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-xl font-medium text-gray-700">
-          Loading profile data...
-        </p>
+      <div className="min-h-[70vh] flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-gray-200 border-t-[#4eaa3c] rounded-full animate-spin" />
+        <p className="mt-4 text-sm text-gray-500">Loading your profile…</p>
       </div>
     );
   }
 
-  // --- Render Profile Data ---
+  if (!profile) return null;
+
+  // --------------------------------------------------
+  // Render
+  // --------------------------------------------------
+
   return (
-    <div className="min-h-screen bg-gray-50 px-6 py-10">
-      <div className="max-w-6xl mx-auto">
-        {/* 🚀 Header */}
-        <div className="bg-white shadow-md rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between mb-8 border border-gray-100">
-          <div className="flex items-center gap-5">
-            <InitialAvatar initial={profile.initial} />
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">
-                {profile.name}
-              </h1>
-              <p className="text-sm text-gray-500">{profile.role}</p>
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 px-4 sm:px-6 py-6">
+      <Toaster position="top-center" />
 
-              <div className="mt-3 flex items-center gap-3">
-                <span
-                  className={`w-3 h-3 rounded-full ${
-                    isOnline ? "bg-green-500" : "bg-gray-400"
+      {/* ── Identity header ─────────────────────── */}
+      <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div
+            className="w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-bold text-white shadow-md"
+            style={{ backgroundColor: DEEP }}
+          >
+            {initials}
+          </div>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-[#17231a] tracking-tight">
+              {profile.firstname} {profile.lastname}
+            </h1>
+            <p className="mt-0.5 flex items-center gap-2 text-sm text-gray-500">
+              <FaUserTie className="text-[#4eaa3c] text-xs" />
+              Job Application Agent
+              <span className="text-gray-300">·</span>
+              <span className="inline-flex items-center gap-1.5">
+                <FaCircle
+                  className={`text-[6px] ${
+                    isOnline ? "text-[#4eaa3c]" : "text-gray-300"
                   }`}
-                ></span>
-                <span className="text-sm text-gray-700 font-medium">
-                  {isOnline ? "Online" : "Offline"}
-                </span>
-                {/* Status Toggle Button (commented out as in original) */}
-              </div>
-            </div>
+                />
+                {isOnline ? "Online" : "Offline"}
+              </span>
+            </p>
           </div>
         </div>
 
-        {/* --- */}
-
-        {/* 📝 Main Info Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Left: Personal Info & Bio */}
-          <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              Contact & Bio
-            </h2>
-            <ul className="space-y-3 text-sm text-gray-700 border-b pb-4 mb-4">
-              <li className="flex items-center gap-3">
-                <FaEnvelope className="text-blue-500" />
-                Email: {profile.email}
-              </li>
-              {/* Add other contact fields here if available on the profile */}
-            </ul>
+        <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500 bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-sm">
+            <FaCalendar className="text-[#4eaa3c]" />
+            {new Date().toLocaleDateString("en-GB", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
           </div>
-
-          {/* Right: Settings */}
-          <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              Preferences & Settings
-            </h2>
-
-            <div className="space-y-5 text-sm text-gray-700">
-              {/* Notifications Toggle (Using local state) */}
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 font-medium">
-                  <FaBell className="text-gray-500 text-lg" />
-                  Notifications
-                </span>
-                <div
-                  onClick={() => setNotifications(!notifications)}
-                  className={`relative w-11 h-6 flex items-center rounded-full cursor-pointer transition ${
-                    notifications ? "bg-[#4eaa3c]" : "bg-gray-300"
-                  }`}
-                >
-                  <div
-                    className={`absolute bg-white w-4 h-4 rounded-full transition-transform shadow ${
-                      notifications ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Visibility Toggle (Using local state) */}
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 font-medium">
-                  {visibility ? (
-                    <FaEye className="text-gray-500 text-lg" />
-                  ) : (
-                    <FaEyeSlash className="text-gray-500 text-lg" />
-                  )}
-                  Profile Visibility
-                </span>
-                <div
-                  onClick={() => setVisibility(!visibility)}
-                  className={`relative w-11 h-6 flex items-center rounded-full cursor-pointer transition ${
-                    visibility ? "bg-[#4eaa3c]" : "bg-gray-300"
-                  }`}
-                >
-                  <div
-                    className={`absolute bg-white w-4 h-4 rounded-full transition-transform shadow ${
-                      visibility ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 🔑 Mobile-Only Logout Button */}
-        <div className="lg:hidden w-full max-w-sm mx-auto mt-8">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 text-lg font-semibold rounded-lg text-white bg-[#4eaa3c] transition duration-150 ease-in-out shadow-md"
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs font-semibold text-gray-600 transition hover:bg-gray-50"
           >
-            <FaSignOutAlt className="text-xl" />
-            Logout
+            <FaSignOutAlt className="text-[11px]" />
+            Log out
           </button>
         </div>
+      </section>
+
+      {/* ── At a glance ─────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="At a glance"
+          description="Your current work in numbers."
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* Stats card */}
+          <div className="relative overflow-hidden bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+            <div className="absolute top-0 right-0 w-36 h-36 bg-emerald-50 rounded-full blur-3xl opacity-70 pointer-events-none" />
+            <div className="relative z-10">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-emerald-50 text-[#4eaa3c] flex items-center justify-center">
+                    <FaChartLine size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900">
+                      Performance snapshot
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Across all assigned clients
+                    </p>
+                  </div>
+                </div>
+                <span
+                  className={`text-xs font-bold px-3 py-1.5 rounded-full ${
+                    isOnline
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {isOnline ? "Available" : "Offline"}
+                </span>
+              </div>
+
+              <div className="mt-4 divide-y divide-gray-100">
+                <SummaryRow
+                  icon={<FaUsers className="text-[10px]" />}
+                  label="Clients managed"
+                  value={profile.stats.clients}
+                  hint="Active client accounts you represent"
+                />
+                <SummaryRow
+                  icon={<FaBriefcase className="text-[10px]" />}
+                  label="Applications submitted"
+                  value={profile.stats.totalApplications}
+                  hint="Excludes pending and archived jobs"
+                />
+                <SummaryRow
+                  icon={<FaCheckCircle className="text-[10px]" />}
+                  label="Approved offers"
+                  value={profile.stats.approvedJobs}
+                  hint="Offers received or hired"
+                />
+                <SummaryRow
+                  icon={<FaRegCalendarAlt className="text-[10px]" />}
+                  label="Interviews scheduled"
+                  value={profile.stats.interviews}
+                  hint="Total across active pipelines"
+                />
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => navigate("/jobs")}
+                  className="inline-flex items-center justify-center gap-2 bg-[#17231a] hover:bg-[#263d2a] text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition whitespace-nowrap"
+                >
+                  Open job pipeline
+                  <FiArrowUpRight size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Dark contact card — mirrors client plan card */}
+          <div className="relative overflow-hidden bg-[#14251a] rounded-2xl p-6 text-white shadow-lg shadow-green-950/10">
+            <div className="absolute -right-12 -top-16 w-64 h-64 rounded-full bg-[#4eaa3c]/20 blur-3xl pointer-events-none" />
+            <div className="absolute right-0 bottom-0 opacity-[0.07] pointer-events-none">
+              <FaUserTie size={180} />
+            </div>
+
+            <div className="relative z-10">
+              <div className="flex justify-between items-start gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-[#8cdb78]">
+                    <FaEnvelope size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white">Contact</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      How we reach you
+                    </p>
+                  </div>
+                </div>
+                <span className="bg-emerald-400/10 text-emerald-300 text-xs font-bold px-3 py-1.5 rounded-full">
+                  Verified
+                </span>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Email
+                  </p>
+                  <p className="mt-0.5 break-all text-sm font-semibold text-white">
+                    {profile.email}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Account role
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold text-white">
+                    Job Application Agent
+                  </p>
+                </div>
+              </div>
+
+              <p className="mt-4 text-xs leading-relaxed text-gray-400 max-w-md">
+                Update your email from settings if it ever changes. Clients see
+                this address when reviewing your work.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Preferences ─────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="Preferences"
+          description="Control how your account behaves."
+        />
+
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 sm:p-7 shadow-sm">
+          <div className="divide-y divide-gray-100">
+            <Toggle
+              checked={notifications}
+              onChange={() => setNotifications(!notifications)}
+              label="Notifications"
+              icon={<FaBell />}
+              description="Get notified about client updates, interview requests, and job changes."
+            />
+            <Toggle
+              checked={visibility}
+              onChange={() => setVisibility(!visibility)}
+              label="Profile visibility"
+              icon={visibility ? <FaEye /> : <FaEyeSlash />}
+              description="When enabled, clients can see your availability and current workload."
+            />
+          </div>
+
+          <div className="mt-5 pt-5 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-gray-400">
+              Preference changes are saved instantly on this device.
+            </p>
+            <button
+              onClick={() => toast.success("Preferences saved")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#4eaa3c] hover:bg-[#60bb4d] text-white px-5 py-2.5 text-sm font-bold shadow-md shadow-green-900/15 transition"
+            >
+              Save preferences
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Mobile logout ──────────────────────── */}
+      <div className="sm:hidden">
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-3 text-sm font-semibold text-gray-600"
+        >
+          <FaSignOutAlt className="text-xs" /> Log out
+        </button>
       </div>
     </div>
   );
