@@ -86,17 +86,17 @@ const Tab: React.FC = () => {
 
   const tabs: TabItem[] = [
     {
-      path: "/work/dashboard",
+      path: "/dashboard",
       name: "Overview",
       icon: <IoGrid size={20} />,
     },
     {
-      path: "/work/jobs",
+      path: "/jobs",
       name: "Jobs",
       icon: <FaBriefcase size={20} />,
     },
-    { path: "/work/inbox", name: "Inbox", icon: <MdMessage size={20} /> },
-    { path: "/work/profile", name: "Profile", icon: <FaUser size={20} /> },
+    { path: "/inbox", name: "Inbox", icon: <MdMessage size={20} /> },
+    { path: "/profile", name: "Profile", icon: <FaUser size={20} /> },
   ];
 
   const currentTab: string =

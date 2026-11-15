@@ -6,8 +6,6 @@ import { toast, Toaster } from "react-hot-toast";
 import {
   FaEnvelope,
   FaPhone,
-  FaLink,
-  FaLock,
   FaEye,
   FaEyeSlash,
   FaCheck,
@@ -15,20 +13,20 @@ import {
   FaBriefcase,
   FaBuilding,
   FaMapMarkerAlt,
-  FaMoneyBillWave,
   FaExternalLinkAlt,
   FaPlus,
   FaTimes,
   FaArrowLeft,
-  FaArrowRight,
   FaUserTie,
   FaShieldAlt,
-  FaCreditCard,
   FaCheckCircle,
   FaExclamationCircle,
   FaRegCalendarAlt,
+  FaLock,
+  FaHourglassHalf,
+  FaInfoCircle,
 } from "react-icons/fa";
-import { FiArrowUpRight, FiChevronRight } from "react-icons/fi";
+import { FiChevronRight } from "react-icons/fi";
 import Api from "../components/Api";
 
 const DEEP = "#17231a";
@@ -38,6 +36,33 @@ const USER_DATA_ENDPOINT = `${Api}/work/userdata`;
 const CREATE_JOB_ENDPOINT = `${Api}/work/newJob`;
 const GET_CLIENT_JOBS_ENDPOINT = `${Api}/work/getClientJobs`;
 const UPDATE_JOB_STATUS_ENDPOINT = `${Api}/work/updateJobStatus`;
+
+// --------------------------------------------------
+// Plan limits — single source of truth
+// --------------------------------------------------
+
+interface PlanLimits {
+  totalQuota: number | null; // null = unlimited
+  dailyLimit: number | null; // null = unlimited
+  label: string;
+}
+
+const PLAN_LIMITS: Record<string, PlanLimits> = {
+  Starter: { totalQuota: 30, dailyLimit: 1, label: "Starter" },
+  Professional: { totalQuota: 60, dailyLimit: 2, label: "Professional" },
+  Elite: { totalQuota: null, dailyLimit: null, label: "Elite" },
+};
+
+const getPlanLimits = (planName?: string): PlanLimits => {
+  if (!planName) return { totalQuota: 0, dailyLimit: 0, label: "No plan" };
+  return (
+    PLAN_LIMITS[planName] ?? {
+      totalQuota: 0,
+      dailyLimit: 0,
+      label: planName,
+    }
+  );
+};
 
 // --------------------------------------------------
 // Types
@@ -85,11 +110,7 @@ interface Application {
   location: string;
   jobType: string;
   requiredSkills: string[];
-  salaryRange?: {
-    min?: number;
-    max?: number;
-    currency?: string;
-  };
+  salaryRange?: { min?: number; max?: number; currency?: string };
 }
 
 interface NewJobPayload {
@@ -162,12 +183,10 @@ const getDaysRemaining = (expiresAt?: Date | string) => {
   }
 };
 
-const formatSalary = (range?: Application["salaryRange"]) => {
-  if (!range || range.min == null || range.max == null) return null;
-  return `${range.currency || ""} ${Number(range.min).toLocaleString()}–${Number(
-    range.max
-  ).toLocaleString()}`;
-};
+const isSameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
 
 const STATUS_OPTIONS = [
   "Pending",
@@ -196,7 +215,73 @@ const PLAN_STYLES: Record<string, string> = {
 };
 
 // --------------------------------------------------
-// Reusable UI
+// Quota computation
+// --------------------------------------------------
+
+interface QuotaInfo {
+  used: number;
+  total: number | null; // null = unlimited
+  remaining: number | null;
+  usedToday: number;
+  dailyLimit: number | null;
+  remainingToday: number | null;
+  quotaExhausted: boolean;
+  dailyExhausted: boolean;
+  canApply: boolean;
+  blockedReason: string | null;
+  planExpired: boolean;
+}
+
+const computeQuota = (
+  plan: ClientPlan | undefined,
+  apps: Application[]
+): QuotaInfo => {
+  const expired = !!plan && isPlanExpired(plan.expiresAt);
+  const limits = getPlanLimits(plan?.name);
+
+  const used = apps.length;
+  const remaining =
+    limits.totalQuota === null ? null : Math.max(limits.totalQuota - used, 0);
+
+  const today = new Date();
+  const usedToday = apps.filter((a) => {
+    if (!a.appliedDate) return false;
+    const d = new Date(a.appliedDate);
+    return !isNaN(d.getTime()) && isSameDay(d, today);
+  }).length;
+
+  const remainingToday =
+    limits.dailyLimit === null
+      ? null
+      : Math.max(limits.dailyLimit - usedToday, 0);
+
+  const quotaExhausted = remaining !== null && remaining === 0;
+  const dailyExhausted = remainingToday !== null && remainingToday === 0;
+
+  let blockedReason: string | null = null;
+  if (expired) blockedReason = "The client's plan has expired.";
+  else if (quotaExhausted)
+    blockedReason = `Monthly quota reached (${limits.totalQuota}/${limits.totalQuota}).`;
+  else if (dailyExhausted)
+    blockedReason = `Daily limit reached (${limits.dailyLimit}/day on ${limits.label}).`;
+
+  return {
+    used,
+    total: limits.totalQuota,
+    remaining,
+    usedToday,
+    dailyLimit: limits.dailyLimit,
+    remainingToday,
+    quotaExhausted,
+    dailyExhausted,
+    canApply: !blockedReason,
+    blockedReason,
+    planExpired: expired,
+  };
+};
+
+// --------------------------------------------------
+// UI pieces
 // --------------------------------------------------
 
 const SectionHeader: React.FC<{ title: string; description?: string }> = ({
@@ -238,16 +323,6 @@ const DetailRow: React.FC<{
   </div>
 );
 
-const StatusPill = ({ status }: { status: string }) => (
-  <span
-    className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${
-      STATUS_STYLES[status] || "bg-gray-100 text-gray-600"
-    }`}
-  >
-    {status}
-  </span>
-);
-
 const PlanPill = ({ plan }: { plan?: ClientPlan }) => {
   if (!plan) {
     return (
@@ -268,15 +343,134 @@ const PlanPill = ({ plan }: { plan?: ClientPlan }) => {
       </span>
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-          expired
-            ? "bg-rose-50 text-rose-700"
-            : "bg-emerald-50 text-emerald-700"
+          expired ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
         }`}
       >
-        {expired ? <FaExclamationCircle className="text-[8px]" /> : <FaCheckCircle className="text-[8px]" />}
+        {expired ? (
+          <FaExclamationCircle className="text-[8px]" />
+        ) : (
+          <FaCheckCircle className="text-[8px]" />
+        )}
         {expired ? "Expired" : "Active"}
       </span>
     </span>
+  );
+};
+
+const QuotaBar: React.FC<{
+  quota: QuotaInfo;
+  compact?: boolean;
+}> = ({ quota, compact = false }) => {
+  const pct =
+    quota.total === null || quota.total === 0
+      ? 0
+      : Math.min(100, Math.round((quota.used / quota.total) * 100));
+
+  const barColor = quota.quotaExhausted
+    ? "bg-rose-500"
+    : pct >= 80
+    ? "bg-amber-500"
+    : "bg-[#4eaa3c]";
+
+  if (compact) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="font-semibold text-gray-500">
+            {quota.total === null
+              ? `${quota.used} used · unlimited`
+              : `${quota.used} / ${quota.total} used`}
+          </span>
+          {quota.dailyLimit !== null && (
+            <span
+              className={`font-bold ${
+                quota.dailyExhausted ? "text-rose-600" : "text-gray-700"
+              }`}
+            >
+              {quota.usedToday}/{quota.dailyLimit} today
+            </span>
+          )}
+        </div>
+        {quota.total !== null && (
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+            <div
+              className={`h-full rounded-full transition-all ${barColor}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#4eaa3c]">
+            Application quota
+          </p>
+          <p className="mt-0.5 text-sm text-gray-600">
+            {quota.total === null
+              ? "Unlimited applications this cycle"
+              : `${quota.used} of ${quota.total} used this cycle`}
+          </p>
+        </div>
+        {quota.total !== null && (
+          <span
+            className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+              quota.quotaExhausted
+                ? "bg-rose-50 text-rose-700"
+                : quota.remaining !== null && quota.remaining <= 5
+                ? "bg-amber-50 text-amber-700"
+                : "bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {quota.remaining} left
+          </span>
+        )}
+      </div>
+
+      {quota.total !== null && (
+        <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+          <div
+            className={`h-full rounded-full transition-all ${barColor}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+
+      {quota.dailyLimit !== null && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-gray-600">
+            <FaHourglassHalf className="text-[#4eaa3c] text-[10px]" />
+            <span>
+              <span className="font-bold text-gray-800">{quota.usedToday}</span>{" "}
+              of <span className="font-bold">{quota.dailyLimit}</span> used
+              today
+            </span>
+          </div>
+          <span
+            className={`text-[11px] font-bold ${
+              quota.dailyExhausted ? "text-rose-600" : "text-emerald-700"
+            }`}
+          >
+            {quota.dailyExhausted
+              ? "Daily limit reached"
+              : `${quota.remainingToday} left today`}
+          </span>
+        </div>
+      )}
+
+      {quota.blockedReason && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2">
+          <FaLock className="mt-0.5 shrink-0 text-[10px] text-amber-600" />
+          <p className="text-[11px] leading-relaxed text-amber-900">
+            {quota.blockedReason} You can still update existing applications.
+          </p>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -286,11 +480,15 @@ const PlanPill = ({ plan }: { plan?: ClientPlan }) => {
 
 const ClientCard: React.FC<{
   client: Client;
-  inFlight?: number;
+  applications: Application[];
   onOpen: () => void;
-}> = ({ client, inFlight = 0, onOpen }) => {
+}> = ({ client, applications, onOpen }) => {
   const roles = safeArrayOfStrings(client.preferredRoles);
   const locations = safeArrayOfStrings(client.preferredLocations);
+  const quota = useMemo(
+    () => computeQuota(client.plan, applications),
+    [client.plan, applications]
+  );
 
   return (
     <button
@@ -317,11 +515,16 @@ const ClientCard: React.FC<{
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <PlanPill plan={client.plan} />
-        {inFlight > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-            {inFlight} active
+        {!quota.canApply && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+            <FaLock className="text-[8px]" />
+            Blocked
           </span>
         )}
+      </div>
+
+      <div className="mt-3">
+        <QuotaBar quota={quota} compact />
       </div>
 
       <div className="mt-3 space-y-1 text-xs">
@@ -353,8 +556,10 @@ const JobScreen: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<Client[]>([]);
+  const [applicationsByClient, setApplicationsByClient] = useState<
+    Record<string, Application[]>
+  >({});
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [applications, setApplications] = useState<Application[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"details" | "applications">(
@@ -380,11 +585,11 @@ const JobScreen: React.FC = () => {
   });
   const [newApp, setNewApp] = useState(emptyForm());
 
-  // Load clients
+  // Load clients + all their applications in one go
   useEffect(() => {
     let mounted = true;
 
-    const fetchUserData = async () => {
+    const fetchAll = async () => {
       try {
         const token = await localforage.getItem<string>("authToken");
         if (!token) {
@@ -395,14 +600,30 @@ const JobScreen: React.FC = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!mounted) return;
-        setClients(
-          (res.data.clients || []).map((c) => ({
-            ...c,
-            jobEmail: c.jobEmail || "",
-            jobPassword: c.jobPassword || "",
-            cv: c.cv || "",
-          }))
+
+        const clientList = (res.data.clients || []).map((c) => ({
+          ...c,
+          jobEmail: c.jobEmail || "",
+          jobPassword: c.jobPassword || "",
+          cv: c.cv || "",
+        }));
+        setClients(clientList);
+
+        // Fetch each client's applications in parallel
+        const entries = await Promise.all(
+          clientList.map(async (c) => {
+            try {
+              const r = await axios.get(
+                `${GET_CLIENT_JOBS_ENDPOINT}/${c._id}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              return [c._id, (r.data.jobs || []) as Application[]] as const;
+            } catch {
+              return [c._id, [] as Application[]] as const;
+            }
+          })
         );
+        if (mounted) setApplicationsByClient(Object.fromEntries(entries));
       } catch (err) {
         if (!mounted) return;
         const axiosError = err as AxiosError;
@@ -420,45 +641,46 @@ const JobScreen: React.FC = () => {
       }
     };
 
-    fetchUserData();
+    fetchAll();
     return () => {
       mounted = false;
     };
   }, [navigate]);
 
-  // Load jobs for selected client
-  useEffect(() => {
-    if (!selectedClient) return;
-    let mounted = true;
-    (async () => {
-      try {
-        const token = await localforage.getItem<string>("authToken");
-        if (!token) return;
-        const res = await axios.get(
-          `${GET_CLIENT_JOBS_ENDPOINT}/${selectedClient._id}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (mounted) setApplications(res.data.jobs || []);
-      } catch {
-        if (mounted) toast.error("Failed to load applications.");
-      }
-    })();
-    return () => {
-      mounted = false;
+  const applications = selectedClient
+    ? applicationsByClient[selectedClient._id] ?? []
+    : [];
+
+  const quota = useMemo(
+    () => computeQuota(selectedClient?.plan, applications),
+    [selectedClient?.plan, applications]
+  );
+
+  const clientDetails = useMemo(() => {
+    if (!selectedClient) return null;
+    return {
+      roles: safeArrayOfStrings(selectedClient.preferredRoles),
+      industries: safeArrayOfStrings(selectedClient.preferredIndustries),
+      locations: safeArrayOfStrings(selectedClient.preferredLocations),
+      planExpired: isPlanExpired(selectedClient.plan?.expiresAt),
+      daysLeft: getDaysRemaining(selectedClient.plan?.expiresAt),
     };
   }, [selectedClient]);
 
   const resetSelection = () => {
     setSelectedClient(null);
-    setApplications([]);
     setActiveTab("details");
     setShowForm(false);
     setNewApp(emptyForm());
   };
 
-  // Submit application
+  // Submit
   const handleSubmit = async () => {
     if (!selectedClient) return;
+    if (!quota.canApply) {
+      toast.error(quota.blockedReason || "You can't add more applications right now.");
+      return;
+    }
     if (!newApp.jobTitle || !newApp.company || !newApp.description) {
       toast.error("Job title, company, and description are required.");
       return;
@@ -502,7 +724,10 @@ const JobScreen: React.FC = () => {
         `${GET_CLIENT_JOBS_ENDPOINT}/${selectedClient._id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setApplications(refresh.data.jobs || []);
+      setApplicationsByClient((prev) => ({
+        ...prev,
+        [selectedClient._id]: refresh.data.jobs || [],
+      }));
       setNewApp(emptyForm());
       setShowForm(false);
       toast.success("Application added.");
@@ -513,8 +738,8 @@ const JobScreen: React.FC = () => {
     }
   };
 
-  // Update job status
   const handleUpdateStatus = async (jobId: string, newStatus: string) => {
+    if (!selectedClient) return;
     setUpdatingStatus(jobId);
     try {
       const token = await localforage.getItem<string>("authToken");
@@ -524,9 +749,12 @@ const JobScreen: React.FC = () => {
         { status: newStatus },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setApplications((prev) =>
-        prev.map((a) => (a._id === jobId ? { ...a, status: newStatus } : a))
-      );
+      setApplicationsByClient((prev) => ({
+        ...prev,
+        [selectedClient._id]: (prev[selectedClient._id] ?? []).map((a) =>
+          a._id === jobId ? { ...a, status: newStatus } : a
+        ),
+      }));
       toast.success("Status updated.");
     } catch {
       toast.error("Failed to update status.");
@@ -534,18 +762,6 @@ const JobScreen: React.FC = () => {
       setUpdatingStatus(null);
     }
   };
-
-  // Derived details
-  const clientDetails = useMemo(() => {
-    if (!selectedClient) return null;
-    return {
-      roles: safeArrayOfStrings(selectedClient.preferredRoles),
-      industries: safeArrayOfStrings(selectedClient.preferredIndustries),
-      locations: safeArrayOfStrings(selectedClient.preferredLocations),
-      planExpired: isPlanExpired(selectedClient.plan?.expiresAt),
-      daysLeft: getDaysRemaining(selectedClient.plan?.expiresAt),
-    };
-  }, [selectedClient]);
 
   // --------------------------------------------------
   // Loading
@@ -601,6 +817,7 @@ const JobScreen: React.FC = () => {
                 <ClientCard
                   key={c._id}
                   client={c}
+                  applications={applicationsByClient[c._id] ?? []}
                   onOpen={() => setSelectedClient(c)}
                 />
               ))}
@@ -626,6 +843,8 @@ const JobScreen: React.FC = () => {
   // --------------------------------------------------
   // Client detail view
   // --------------------------------------------------
+
+  const canApply = quota.canApply;
 
   return (
     <div className="w-full max-w-[1400px] mx-auto space-y-6 px-4 sm:px-6 py-6">
@@ -664,17 +883,30 @@ const JobScreen: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => {
-            setActiveTab("applications");
-            setShowForm(true);
-          }}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#17231a] hover:bg-[#263d2a] text-white px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap"
-        >
-          <FaPlus className="text-[10px]" />
-          Log application
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setActiveTab("applications");
+              setShowForm(true);
+            }}
+            disabled={!canApply}
+            title={quota.blockedReason ?? undefined}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#17231a] hover:bg-[#263d2a] text-white px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {canApply ? (
+              <FaPlus className="text-[10px]" />
+            ) : (
+              <FaLock className="text-[10px]" />
+            )}
+            {canApply ? "Log application" : "Limit reached"}
+          </button>
+        </div>
       </section>
+
+      {/* Quota card */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-5 sm:p-6 shadow-sm">
+        <QuotaBar quota={quota} />
+      </div>
 
       {/* Tabs */}
       <section className="flex items-center gap-1 rounded-xl border border-gray-100 bg-white p-1 shadow-sm w-fit">
@@ -852,9 +1084,7 @@ const JobScreen: React.FC = () => {
                             : "bg-emerald-400/15 text-emerald-300"
                         }`}
                       >
-                        {clientDetails.planExpired
-                          ? "Expired"
-                          : "Active"}
+                        {clientDetails.planExpired ? "Expired" : "Active"}
                       </span>
                     )}
                   </div>
@@ -877,35 +1107,55 @@ const JobScreen: React.FC = () => {
       {/* Applications tab */}
       {activeTab === "applications" && (
         <div className="space-y-5">
-          {/* Form (collapsible) */}
+          {/* Form (collapsible, disabled if quota blocked) */}
           <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
             <button
-              onClick={() => setShowForm((v) => !v)}
-              className="w-full flex items-center justify-between gap-3 px-5 sm:px-7 py-4 text-left"
+              onClick={() => canApply && setShowForm((v) => !v)}
+              disabled={!canApply}
+              className="w-full flex items-center justify-between gap-3 px-5 sm:px-7 py-4 text-left disabled:cursor-not-allowed disabled:opacity-60"
             >
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-[#4eaa3c]">
-                  <FaPlus className="text-xs" />
+                <div
+                  className={`flex h-9 w-9 items-center justify-center rounded-lg ${
+                    canApply
+                      ? "bg-emerald-50 text-[#4eaa3c]"
+                      : "bg-gray-100 text-gray-400"
+                  }`}
+                >
+                  {canApply ? (
+                    <FaPlus className="text-xs" />
+                  ) : (
+                    <FaLock className="text-xs" />
+                  )}
                 </div>
                 <div>
                   <p className="text-sm font-bold text-[#17231a]">
-                    {showForm ? "Hide form" : "Log a new application"}
+                    {canApply
+                      ? showForm
+                        ? "Hide form"
+                        : "Log a new application"
+                      : "Application limit reached"}
                   </p>
                   <p className="text-xs text-gray-500">
-                    Add a job you applied to on behalf of{" "}
-                    {selectedClient.firstname}
+                    {canApply
+                      ? `Add a job you applied to on behalf of ${selectedClient.firstname}`
+                      : quota.blockedReason ||
+                        "You can't log new applications right now."}
                   </p>
                 </div>
               </div>
-              <FaChevronDown
-                className={`shrink-0 text-gray-400 transition-transform ${
-                  showForm ? "rotate-180" : ""
-                }`}
-              />
+              {canApply && (
+                <FaChevronDown
+                  className={`shrink-0 text-gray-400 transition-transform ${
+                    showForm ? "rotate-180" : ""
+                  }`}
+                />
+              )}
             </button>
 
-            {showForm && (
+            {showForm && canApply && (
               <div className="border-t border-gray-100 p-5 sm:p-7 space-y-4">
+                {/* ...form fields identical to previous version... */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className={baseLabel}>Job title *</label>
@@ -1103,8 +1353,8 @@ const JobScreen: React.FC = () => {
                   </button>
                   <button
                     onClick={handleSubmit}
-                    disabled={isSubmitting}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#4eaa3c] hover:bg-[#60bb4d] text-white px-6 py-2.5 text-sm font-bold shadow-md shadow-green-900/15 transition disabled:opacity-50"
+                    disabled={isSubmitting || !canApply}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#4eaa3c] hover:bg-[#60bb4d] text-white px-6 py-2.5 text-sm font-bold shadow-md shadow-green-900/15 transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSubmitting ? "Saving…" : "Save application"}
                     {!isSubmitting && <FaCheck className="text-xs" />}
@@ -1204,7 +1454,7 @@ const JobScreen: React.FC = () => {
               </table>
             </div>
 
-            {applications.length === 0 && (
+            {applications.length === 0 && canApply && (
               <div className="mt-4 flex justify-center">
                 <button
                   onClick={() => setShowForm(true)}

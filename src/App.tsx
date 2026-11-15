@@ -3,10 +3,11 @@ import {
   Routes,
   Route,
   Navigate,
-  // Outlet,
+  Outlet,
+  useLocation,
 } from "react-router-dom";
-// import localforage from "localforage";
-// import { useEffect, useState } from "react";
+import localforage from "localforage";
+import { useEffect, useState } from "react";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/Forgot";
@@ -16,33 +17,50 @@ import Jobs from "./pages/Jobs";
 import Inbox from "./pages/Inbox";
 import Profile from "./pages/Profile";
 
-// --- Protected Route Component ---
+function ProtectedRoute() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const location = useLocation();
 
-// const ProtectedLayout = () => {
-//   // isAuthenticated: null = checking auth, false = not logged in, true = logged in
-//   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-//   const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let mounted = true;
 
-//   useEffect(() => {
-//     const checkAuth = async () => {
-//       try {
-//         // Retrieve the token saved during login (using the key 'authToken' from the Login component)
-//         const token = await localforage.getItem("authToken");
+    const checkAuth = async () => {
+      try {
+        const token = await localforage.getItem<string>("authToken");
 
-//         // If token exists and is a non-empty string, set isAuthenticated to true
-//         setIsAuthenticated(!!token);
-//       } catch (error) {
-//         console.error("Auth check failed:", error);
-//         setIsAuthenticated(false);
-//       } finally {
-//         setLoading(false);
-//       }
-//     };
-//     checkAuth();
-//   }, []);
+        if (mounted) {
+          setAuthenticated(Boolean(token));
+        }
+      } catch (error) {
+        console.error("Auth check failed:", error);
 
-//   return isAuthenticated ? <Outlet /> : <Navigate to="/" replace />;
-// };
+        if (mounted) {
+          setAuthenticated(false);
+        }
+      }
+    };
+
+    checkAuth();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (authenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-gray-200 border-t-[#4eaa3c] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return <Navigate to="/" replace state={{ from: location }} />;
+  }
+
+  return <Outlet />;
+}
 
 // --- Main App Component ---
 export default function App() {
@@ -54,30 +72,15 @@ export default function App() {
         <Route path="/signup" element={<Signup />} />
         <Route path="/forgot" element={<ForgotPassword />} />
 
-        {/* Protected Routes 
-          Any route nested under this will require the user to be authenticated 
-          as determined by the logic in ProtectedLayout. 
-        */}
-        {/* <Route element={<ProtectedLayout />}> */}
-        {/* Main Customer Dashboard with Tabs */}
-        {/* Path is "/customer" */}
-        <Route path="/work" element={<TabLayout />}>
-          {/* Redirect /customer to /customer/dashboard */}
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="jobs" element={<Jobs />} />
-          <Route path="inbox" element={<Inbox />} />
-          <Route path="profile" element={<Profile />} />
+         <Route element={<ProtectedRoute />}>
+          <Route element={<TabLayout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/jobs" element={<Jobs />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/profile" element={<Profile />} />
+          </Route>
         </Route>
 
-        {/* Fallback for any protected route that doesn't match above */}
-        {/* Redirects any unmatched path inside the protected area back to the dashboard */}
-        <Route path="*" element={<Navigate to="/work/dashboard" replace />} />
-        {/* </Route> */}
-
-        {/* Catch-all route for any unhandled PUBLIC paths. 
-          If a user tries to access /some-random-public-page, they will be redirected to Login.
-        */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
