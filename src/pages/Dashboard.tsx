@@ -324,7 +324,7 @@ const Home: React.FC = () => {
   // --------------------------------------------------
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6 px-4 sm:px-6 py-6">
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-4">
       <Toaster position="top-center" />
 
       {/* ── Identity header ─────────────────────── */}
@@ -397,12 +397,6 @@ const Home: React.FC = () => {
                   label="Applications submitted"
                   value={monthlyApplications}
                   hint="Counted from this month's applied dates"
-                />
-                <StatRow
-                  icon={<FaChartLine className="text-[10px]" />}
-                  label="Active jobs"
-                  value={activeJobs}
-                  hint="Applied or currently interviewing"
                 />
                 <StatRow
                   icon={<FaUserTie className="text-[10px]" />}
@@ -571,78 +565,6 @@ const Home: React.FC = () => {
               />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </section>
-
-      {/* ── Recent applications ───────────────── */}
-      <section>
-        <SectionHeader
-          title="Recent applications"
-          description="Latest submissions across all clients."
-        />
-
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 sm:p-7 shadow-sm">
-          <div className="overflow-x-auto -mx-5 sm:-mx-7 px-5 sm:px-7">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  <th className="py-2.5 pr-3">Job title</th>
-                  <th className="py-2.5 pr-3">Company</th>
-                  <th className="py-2.5 pr-3">Status</th>
-                  <th className="py-2.5 pr-3 text-right">Applied</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentApplications.length > 0 ? (
-                  recentApplications.map((job) => (
-                    <tr
-                      key={job._id}
-                      className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60"
-                    >
-                      <td className="py-3 pr-3 text-sm font-semibold text-[#17231a]">
-                        {job.title}
-                      </td>
-                      <td className="py-3 pr-3 text-sm text-gray-600">
-                        {job.company}
-                      </td>
-                      <td className="py-3 pr-3">
-                        <StatusPill status={job.status} />
-                      </td>
-                      <td className="py-3 pr-3 text-right text-xs text-gray-500 whitespace-nowrap">
-                        {job.appliedDate &&
-                        !isNaN(new Date(job.appliedDate).getTime())
-                          ? formatDistanceToNow(new Date(job.appliedDate), {
-                              addSuffix: true,
-                            })
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="py-8 text-center text-xs text-gray-400 italic"
-                    >
-                      No applications tracked yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {jobs.length > 5 && (
-            <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end">
-              <button
-                onClick={() => navigate("/jobs")}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#4eaa3c] hover:bg-[#60bb4d] text-white px-5 py-2.5 text-sm font-bold shadow-md shadow-green-900/15 transition"
-              >
-                View all jobs
-                <FaArrowRight className="text-xs" />
-              </button>
-            </div>
-          )}
         </div>
       </section>
     </div>

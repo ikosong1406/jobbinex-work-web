@@ -133,7 +133,7 @@ interface NewJobPayload {
 // --------------------------------------------------
 
 const safeArrayOfStrings = (
-  value: string | string[] | null | undefined
+  value: string | string[] | null | undefined,
 ): string[] => {
   if (Array.isArray(value)) return value;
   if (typeof value === "string")
@@ -234,7 +234,7 @@ interface QuotaInfo {
 
 const computeQuota = (
   plan: ClientPlan | undefined,
-  apps: Application[]
+  apps: Application[],
 ): QuotaInfo => {
   const expired = !!plan && isPlanExpired(plan.expiresAt);
   const limits = getPlanLimits(plan?.name);
@@ -343,7 +343,9 @@ const PlanPill = ({ plan }: { plan?: ClientPlan }) => {
       </span>
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-          expired ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
+          expired
+            ? "bg-rose-50 text-rose-700"
+            : "bg-emerald-50 text-emerald-700"
         }`}
       >
         {expired ? (
@@ -369,8 +371,8 @@ const QuotaBar: React.FC<{
   const barColor = quota.quotaExhausted
     ? "bg-rose-500"
     : pct >= 80
-    ? "bg-amber-500"
-    : "bg-[#4eaa3c]";
+      ? "bg-amber-500"
+      : "bg-[#4eaa3c]";
 
   if (compact) {
     return (
@@ -422,8 +424,8 @@ const QuotaBar: React.FC<{
               quota.quotaExhausted
                 ? "bg-rose-50 text-rose-700"
                 : quota.remaining !== null && quota.remaining <= 5
-                ? "bg-amber-50 text-amber-700"
-                : "bg-emerald-50 text-emerald-700"
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-emerald-50 text-emerald-700"
             }`}
           >
             {quota.remaining} left
@@ -487,7 +489,7 @@ const ClientCard: React.FC<{
   const locations = safeArrayOfStrings(client.preferredLocations);
   const quota = useMemo(
     () => computeQuota(client.plan, applications),
-    [client.plan, applications]
+    [client.plan, applications],
   );
 
   return (
@@ -563,7 +565,7 @@ const JobScreen: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"details" | "applications">(
-    "details"
+    "details",
   );
   const [showForm, setShowForm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -615,13 +617,13 @@ const JobScreen: React.FC = () => {
             try {
               const r = await axios.get(
                 `${GET_CLIENT_JOBS_ENDPOINT}/${c._id}`,
-                { headers: { Authorization: `Bearer ${token}` } }
+                { headers: { Authorization: `Bearer ${token}` } },
               );
               return [c._id, (r.data.jobs || []) as Application[]] as const;
             } catch {
               return [c._id, [] as Application[]] as const;
             }
-          })
+          }),
         );
         if (mounted) setApplicationsByClient(Object.fromEntries(entries));
       } catch (err) {
@@ -648,12 +650,12 @@ const JobScreen: React.FC = () => {
   }, [navigate]);
 
   const applications = selectedClient
-    ? applicationsByClient[selectedClient._id] ?? []
+    ? (applicationsByClient[selectedClient._id] ?? [])
     : [];
 
   const quota = useMemo(
     () => computeQuota(selectedClient?.plan, applications),
-    [selectedClient?.plan, applications]
+    [selectedClient?.plan, applications],
   );
 
   const clientDetails = useMemo(() => {
@@ -678,7 +680,9 @@ const JobScreen: React.FC = () => {
   const handleSubmit = async () => {
     if (!selectedClient) return;
     if (!quota.canApply) {
-      toast.error(quota.blockedReason || "You can't add more applications right now.");
+      toast.error(
+        quota.blockedReason || "You can't add more applications right now.",
+      );
       return;
     }
     if (!newApp.jobTitle || !newApp.company || !newApp.description) {
@@ -722,7 +726,7 @@ const JobScreen: React.FC = () => {
 
       const refresh = await axios.get(
         `${GET_CLIENT_JOBS_ENDPOINT}/${selectedClient._id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       setApplicationsByClient((prev) => ({
         ...prev,
@@ -747,12 +751,12 @@ const JobScreen: React.FC = () => {
       await axios.patch(
         `${UPDATE_JOB_STATUS_ENDPOINT}/${jobId}/status`,
         { status: newStatus },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       setApplicationsByClient((prev) => ({
         ...prev,
         [selectedClient._id]: (prev[selectedClient._id] ?? []).map((a) =>
-          a._id === jobId ? { ...a, status: newStatus } : a
+          a._id === jobId ? { ...a, status: newStatus } : a,
         ),
       }));
       toast.success("Status updated.");
@@ -791,8 +795,8 @@ const JobScreen: React.FC = () => {
               Client job management
             </h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              {clients.length}{" "}
-              {clients.length === 1 ? "client" : "clients"} assigned to you
+              {clients.length} {clients.length === 1 ? "client" : "clients"}{" "}
+              assigned to you
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500 bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-sm">
@@ -847,7 +851,7 @@ const JobScreen: React.FC = () => {
   const canApply = quota.canApply;
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6 px-4 sm:px-6 py-6">
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-4">
       <Toaster position="top-center" />
 
       {/* Header */}
@@ -1046,7 +1050,7 @@ const JobScreen: React.FC = () => {
                       ? showPassword
                         ? selectedClient.jobPassword
                         : "•".repeat(
-                            Math.min(selectedClient.jobPassword.length, 12)
+                            Math.min(selectedClient.jobPassword.length, 12),
                           )
                       : "—"}
                   </p>
