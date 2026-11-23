@@ -280,7 +280,7 @@ const ProfilePage: React.FC = () => {
   // --------------------------------------------------
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-6">
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-6 px-2">
       <Toaster position="top-center" />
 
       {/* ── Identity header ─────────────────────── */}

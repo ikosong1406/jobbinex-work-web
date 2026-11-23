@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios, { AxiosError } from "axios";
 import toast, { Toaster } from "react-hot-toast";
 import localforage from "localforage"; // Import localforage
@@ -160,7 +160,7 @@ const Login: React.FC = () => {
         </div>
 
         {/* Right-side Form Section */}
-        <div className="w-full md:w-[45%] bg-white p-10 md:p-16 flex flex-col justify-center shadow-2xl rounded-xl">
+        <div className="w-full md:w-[45%] bg-white p-6 md:p-12 flex flex-col justify-center shadow-2xl rounded-xl">
           <h2 className="text-2xl md:text-3xl font-bold text-gray-900">
             Hello there,
           </h2>
@@ -168,7 +168,7 @@ const Login: React.FC = () => {
             Welcome Back, let's have you logged in
           </p>
 
-          <form className="space-y-6" onSubmit={handleLogin}>
+          <form className="space-y-4" onSubmit={handleLogin}>
             {/* Email Input */}
             <div>
               <label
@@ -257,13 +257,6 @@ const Login: React.FC = () => {
                 />
                 <span>Remember me</span>
               </label>
-              <Link
-                to="/forgot"
-                className="hover:underline font-medium"
-                style={{ color: primaryColor }}
-              >
-                Forgot Password?
-              </Link>
             </div>
 
             {/* Submit Button */}
@@ -280,18 +273,6 @@ const Login: React.FC = () => {
               {isLoading ? "Logging In..." : "Login"}
             </button>
           </form>
-
-          {/* Sign Up Link */}
-          <p className="text-sm text-gray-600 mt-4 text-center">
-            Don't have an account?{" "}
-            <Link
-              to="/signup"
-              className="hover:underline font-medium"
-              style={{ color: primaryColor }}
-            >
-              Sign up
-            </Link>
-          </p>
         </div>
       </div>
     </div>
