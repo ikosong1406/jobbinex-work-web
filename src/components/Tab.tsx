@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { IoGridOutline, IoLogOutOutline } from "react-icons/io5";
@@ -376,7 +376,7 @@ const Tab = () => {
               end
               className={({ isActive }) => `
                 flex flex-col items-center justify-center gap-1
-                flex-1 py-2.5 rounded-xl transition-all duration-300
+                flex-1 py-1 rounded-xl transition-all duration-300
                 ${
                   isActive
                     ? "bg-[#4eaa3c] text-white"

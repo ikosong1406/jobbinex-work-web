@@ -24,13 +24,11 @@ import {
   FaRegCalendarAlt,
   FaLock,
   FaHourglassHalf,
-  FaInfoCircle,
 } from "react-icons/fa";
 import { FiChevronRight } from "react-icons/fi";
 import Api from "../components/Api";
 
 const DEEP = "#17231a";
-const PRIMARY = "#4eaa3c";
 
 const USER_DATA_ENDPOINT = `${Api}/work/userdata`;
 const CREATE_JOB_ENDPOINT = `${Api}/work/newJob`;
@@ -851,7 +849,7 @@ const JobScreen: React.FC = () => {
   const canApply = quota.canApply;
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-4">
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-4 px-2">
       <Toaster position="top-center" />
 
       {/* Header */}

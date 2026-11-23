@@ -17,20 +17,14 @@ import {
   isThisMonth,
   isThisWeek,
   getDay,
-  formatDistanceToNow,
 } from "date-fns";
 import {
   FaBriefcase,
   FaCalendarAlt,
   FaPoundSign,
   FaUserTie,
-  FaChartLine,
   FaUsers,
-  FaArrowRight,
-  FaCheck,
-  FaCheckCircle,
   FaClock,
-  FaEnvelope,
 } from "react-icons/fa";
 import { FiArrowUpRight, FiChevronRight } from "react-icons/fi";
 import Api from "../components/Api";
@@ -181,25 +175,6 @@ const StatRow: React.FC<{
   </div>
 );
 
-const StatusPill = ({ status }: { status: Job["status"] }) => {
-  const styles: Record<Job["status"], string> = {
-    Pending: "bg-amber-50 text-amber-700",
-    Applied: "bg-blue-50 text-blue-700",
-    Interviewing: "bg-violet-50 text-violet-700",
-    "Offer Received": "bg-emerald-50 text-emerald-700",
-    Rejected: "bg-rose-50 text-rose-700",
-    Hired: "bg-green-50 text-green-700",
-    Archived: "bg-gray-100 text-gray-600",
-  };
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${styles[status]}`}
-    >
-      {status}
-    </span>
-  );
-};
-
 // --------------------------------------------------
 // Main
 // --------------------------------------------------
@@ -263,11 +238,6 @@ const Home: React.FC = () => {
   const monthlyApplications = useMemo(() => getMonthApplications(jobs), [jobs]);
   const monthlyEarnings = monthlyApplications * RATE_PER_APPLICATION;
 
-  const activeJobs = useMemo(
-    () =>
-      jobs.filter((j) => ["Applied", "Interviewing"].includes(j.status)).length,
-    [jobs],
-  );
   const interviewsSecured = useMemo(
     () => jobs.filter((j) => j.status === "Interviewing").length,
     [jobs],
@@ -304,8 +274,6 @@ const Home: React.FC = () => {
     [clients, clientJobStats],
   );
 
-  const recentApplications = useMemo(() => jobs.slice(0, 5), [jobs]);
-
   // --------------------------------------------------
   // Loading
   // --------------------------------------------------
@@ -324,7 +292,7 @@ const Home: React.FC = () => {
   // --------------------------------------------------
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-4">
+    <div className="w-full max-w-[1400px] mx-auto space-y-6 py-4 px-2">
       <Toaster position="top-center" />
 
       {/* ── Identity header ─────────────────────── */}
