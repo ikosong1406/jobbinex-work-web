@@ -32,7 +32,7 @@ import Api from "../components/Api";
 const PRIMARY = "#4eaa3c";
 const DEEP = "#17231a";
 const CLIENT_DASHBOARD_ENDPOINT = `${Api}/work/userdata`;
-const RATE_PER_APPLICATION = 1;
+const RATE_PER_APPLICATION = 0.8;
 
 // --------------------------------------------------
 // Types
